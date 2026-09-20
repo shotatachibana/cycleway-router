@@ -21,8 +21,50 @@ const CycleGraph = (() => {
   }
 
   // GeoJSON FeatureCollection(LineString群)からグラフを構築する。
-  // 戻り値: { nodeCoords: [[lon,lat], ...], nodeIndex: Map<key,int>, adjacency: Array<Array<{to,dist}>> }
-  function buildGraph(geojson) {
+  // weightFn(feature) => 距離に掛けるペナルティ係数(専用度合いが低いほど大きくする)。
+  // 省略時は1.0(ペナルティなし)。エッジには物理距離distと探索用の重みweightの
+  // 両方を持たせ、Dijkstraはweightを最小化しつつ実距離distを別集計できるようにする。
+  // 戻り値: { nodeCoords: [[lon,lat], ...], nodeIndex: Map<key,int>,
+  //          adjacency: Array<Array<{to,dist,weight,tier}>> }
+  function buildGraph(geojson, weightFn) {
+    const nodeIndex = new Map();
+    const nodeCoords = [];
+    const adjacency = [];
+    const getWeight = weightFn || (() => 1.0);
+
+    function getOrCreateNode(lon, lat) {
+      const key = nodeKey(lon, lat);
+      let idx = nodeIndex.get(key);
+      if (idx === undefined) {
+        idx = nodeCoords.length;
+        nodeIndex.set(key, idx);
+        nodeCoords.push([lon, lat]);
+        adjacency.push([]);
+      }
+      return idx;
+    }
+
+    for (const feature of geojson.features) {
+      const coords = feature.geometry.coordinates;
+      const tier = feature.properties ? feature.properties.tier : undefined;
+      const multiplier = getWeight(feature);
+      for (let i = 0; i < coords.length - 1; i++) {
+        const [lon1, lat1] = coords[i];
+        const [lon2, lat2] = coords[i + 1];
+        const a = getOrCreateNode(lon1, lat1);
+        const b = getOrCreateNode(lon2, lat2);
+        const dist = haversineMeters(lon1, lat1, lon2, lat2);
+        const weight = dist * multiplier;
+        adjacency[a].push({ to: b, dist, weight, tier });
+        adjacency[b].push({ to: a, dist, weight, tier });
+      }
+    }
+    return { nodeCoords, nodeIndex, adjacency };
+  }
+
+  // 2つのグラフ(同じ座標丸め精度で作った前提)を1つに合体する。
+  // 専用道路網+参考レイヤー(lane/shared_lane)をまとめて探索対象にするために使う。
+  function mergeGraphs(graphs) {
     const nodeIndex = new Map();
     const nodeCoords = [];
     const adjacency = [];
@@ -39,16 +81,13 @@ const CycleGraph = (() => {
       return idx;
     }
 
-    for (const feature of geojson.features) {
-      const coords = feature.geometry.coordinates;
-      for (let i = 0; i < coords.length - 1; i++) {
-        const [lon1, lat1] = coords[i];
-        const [lon2, lat2] = coords[i + 1];
-        const a = getOrCreateNode(lon1, lat1);
-        const b = getOrCreateNode(lon2, lat2);
-        const dist = haversineMeters(lon1, lat1, lon2, lat2);
-        adjacency[a].push({ to: b, dist });
-        adjacency[b].push({ to: a, dist });
+    for (const g of graphs) {
+      const remap = g.nodeCoords.map(([lon, lat]) => getOrCreateNode(lon, lat));
+      for (let i = 0; i < g.adjacency.length; i++) {
+        const from = remap[i];
+        for (const edge of g.adjacency[i]) {
+          adjacency[from].push({ ...edge, to: remap[edge.to] });
+        }
       }
     }
     return { nodeCoords, nodeIndex, adjacency };
@@ -113,13 +152,14 @@ const CycleGraph = (() => {
     }
   }
 
-  // Dijkstra法で最短経路を求める。戻り値: 経路上のノードindex配列(見つからなければnull)。
+  // Dijkstra法(重みweightを最小化)で最短経路を求める。
+  // 戻り値: { path, distanceM(実距離の合計), weightedDistanceM, tierDistanceM(tierごとの実距離内訳) }
   function shortestPath(graph, startIdx, endIdx) {
     if (startIdx < 0 || endIdx < 0) return null;
-    const dist = new Float64Array(graph.nodeCoords.length).fill(Infinity);
+    const weightDist = new Float64Array(graph.nodeCoords.length).fill(Infinity);
     const prev = new Int32Array(graph.nodeCoords.length).fill(-1);
     const visited = new Uint8Array(graph.nodeCoords.length);
-    dist[startIdx] = 0;
+    weightDist[startIdx] = 0;
     const heap = new MinHeap();
     heap.push(0, startIdx);
 
@@ -130,16 +170,16 @@ const CycleGraph = (() => {
       if (u === endIdx) break;
       for (const edge of graph.adjacency[u]) {
         if (visited[edge.to]) continue;
-        const nd = d + edge.dist;
-        if (nd < dist[edge.to]) {
-          dist[edge.to] = nd;
+        const nd = d + edge.weight;
+        if (nd < weightDist[edge.to]) {
+          weightDist[edge.to] = nd;
           prev[edge.to] = u;
           heap.push(nd, edge.to);
         }
       }
     }
 
-    if (dist[endIdx] === Infinity) return null;
+    if (weightDist[endIdx] === Infinity) return null;
     const path = [];
     let cur = endIdx;
     while (cur !== -1) {
@@ -147,8 +187,20 @@ const CycleGraph = (() => {
       cur = prev[cur];
     }
     path.reverse();
-    return { path, distanceM: dist[endIdx] };
+
+    let distanceM = 0;
+    const tierDistanceM = {};
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i];
+      const b = path[i + 1];
+      const edge = graph.adjacency[a].find((e) => e.to === b);
+      if (edge) {
+        distanceM += edge.dist;
+        tierDistanceM[edge.tier] = (tierDistanceM[edge.tier] || 0) + edge.dist;
+      }
+    }
+    return { path, distanceM, weightedDistanceM: weightDist[endIdx], tierDistanceM };
   }
 
-  return { buildGraph, nearestNode, shortestPath, haversineMeters };
+  return { buildGraph, mergeGraphs, nearestNode, shortestPath, haversineMeters };
 })();

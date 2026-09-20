@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>自転車専用道路 経路検索(関東・試作版)</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" />
 <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
@@ -12,13 +12,13 @@
   <h1>自転車専用道路 経路検索<span class="badge">試作版</span></h1>
 
   <section>
-    <h2>近距離検索(専用道路ネットワークのみ)</h2>
+    <h2>近距離検索</h2>
     <p class="hint">
-      地図をクリックして出発地・目的地を指定してください。自転車専用道路
-      (<code>highway=cycleway</code>)だけをブラウザ内でつないだ経路を探します。
-      専用道路網は地域ごとに分断されているため、離れた地点間では「経路が
-      見つかりません」と表示されることがあります(その場合は下の事前計算ルートを
-      確認してください)。
+      地図をクリックして出発地・目的地を指定してください。専用道路を最優先に、
+      繋がらない場合は自転車レーン・車道混在(矢羽根等)も使ってブラウザ内で
+      経路を探します(専用道路ほど優先度は高くありません)。それでも繋がらない
+      場合は「経路が見つかりません」と表示されるので、その場合は下の事前計算
+      ルートを確認してください。
     </p>
     <div class="row">
       <button id="btn-set-from">① 出発地をセット</button>
@@ -32,7 +32,7 @@
     <h2>専用度合いの凡例</h2>
     <label class="checkbox-row">
       <input type="checkbox" id="toggle-reference" />
-      参考レイヤー(専用通行帯・車道混在)を表示
+      自転車レーン・車道混在を地図上に表示(近距離検索では表示に関わらず利用します)
     </label>
     <div id="legend"></div>
   </section>
@@ -58,7 +58,7 @@
 </div>
 <div id="map"></div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
 <script src="assets/graph.js"></script>
 <script src="assets/main.js"></script>
 </body>
