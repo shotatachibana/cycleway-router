@@ -28,6 +28,14 @@ tags:
       - "cycleway:right"
       - "cycleway:both"
     value: "track"
+  # 2026-09-20追記: 東京都の自転車通行空間マップ(wagmap)を参考に、
+  # 「専用」には含めないが地図上で参考表示する低位カテゴリを追加
+  painted_lane:
+    keys: ["cycleway", "cycleway:left", "cycleway:right", "cycleway:both"]
+    value: "lane"
+  shared_lane:
+    keys: ["cycleway", "cycleway:left", "cycleway:right", "cycleway:both"]
+    value: "shared_lane"
 
 attributes_to_summarize:
   - foot
@@ -41,6 +49,8 @@ output:
   raw_geojson: "data/raw/osm_survey/kanto_cycleway_raw.geojson"
   raw_json_independent: "data/raw/osm_survey/kanto_independent_cycleway.json"
   raw_json_separated: "data/raw/osm_survey/kanto_separated_track.json"
+  raw_json_painted_lane: "data/raw/osm_survey/kanto_painted_lane.json"
+  raw_json_shared_lane: "data/raw/osm_survey/kanto_shared_lane.json"
   table: "results/tables/osm_survey_kanto_summary.csv"
   table_by_prefecture: "results/tables/osm_survey_kanto_by_prefecture.csv"
   map_png: "results/figures/osm_survey_kanto_map.png"

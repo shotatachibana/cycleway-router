@@ -52,11 +52,15 @@ out tags geom;
 """.strip()
 
 
-def build_separated_track_query(cfg: dict) -> str:
+def build_cycleway_value_query(cfg: dict, tag_key: str) -> str:
+    """cycleway(:left/:right/:both)=<value> の形式で書ける複数タグを1クエリにまとめる。
+
+    separated_track・painted_lane・shared_lane で共通の形なので汎用化した。
+    """
     rel_id = cfg["region"]["osm_relation_id"]
     area_id = 3600000000 + rel_id
-    keys = cfg["tags"]["separated_track"]["keys"]
-    value = cfg["tags"]["separated_track"]["value"]
+    keys = cfg["tags"][tag_key]["keys"]
+    value = cfg["tags"][tag_key]["value"]
     filters = "".join(f'way["{k}"="{value}"](area.searchArea);' for k in keys)
     return f"""
 [out:json][timeout:{cfg['overpass']['timeout_s']}];
@@ -66,6 +70,10 @@ area({area_id})->.searchArea;
 );
 out tags geom;
 """.strip()
+
+
+def build_separated_track_query(cfg: dict) -> str:
+    return build_cycleway_value_query(cfg, "separated_track")
 
 
 def build_prefecture_query(cfg: dict) -> str:
@@ -98,11 +106,23 @@ def main():
     out_path.write_text(json.dumps(sep, ensure_ascii=False), encoding="utf-8")
     print(f"  -> {out_path} ({len(sep.get('elements', []))} elements)")
 
-    print("[3/3] 都県境界(admin_level=4)を取得中...")
+    print("[3/5] 都県境界(admin_level=4)を取得中...")
     pref = run_overpass_query(build_prefecture_query(cfg), cfg)
     out_path = raw_dir / "kanto_prefectures.json"
     out_path.write_text(json.dumps(pref, ensure_ascii=False), encoding="utf-8")
     print(f"  -> {out_path} ({len(pref.get('elements', []))} elements)")
+
+    print("[4/5] 参考表示用: 自転車専用通行帯(cycleway=lane系)を取得中...")
+    lane = run_overpass_query(build_cycleway_value_query(cfg, "painted_lane"), cfg)
+    out_path = REPO_ROOT / cfg["output"]["raw_json_painted_lane"]
+    out_path.write_text(json.dumps(lane, ensure_ascii=False), encoding="utf-8")
+    print(f"  -> {out_path} ({len(lane.get('elements', []))} elements)")
+
+    print("[5/5] 参考表示用: 車道混在(cycleway=shared_lane系)を取得中...")
+    shared = run_overpass_query(build_cycleway_value_query(cfg, "shared_lane"), cfg)
+    out_path = REPO_ROOT / cfg["output"]["raw_json_shared_lane"]
+    out_path.write_text(json.dumps(shared, ensure_ascii=False), encoding="utf-8")
+    print(f"  -> {out_path} ({len(shared.get('elements', []))} elements)")
 
     print("完了。次は summarize.py を実行してください。")
 

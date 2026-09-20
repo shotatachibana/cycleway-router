@@ -1,14 +1,67 @@
 const KANTO_CENTER = [36.0, 139.6];
 
+// 道路網を目立たせたいので、背景は淡い配色のタイルを使う
+// (標準のOSMタイルは色・情報量が多く、専用道路の色分けが埋もれてしまうため)
+// 注: CartoDB Positronは現在APIキーが無いと"API KEY REQUIRED"の透かしが入るため
+// 不採用(2026-09-20に実機確認)。Esri World Light Gray Base(無料・キー不要)を使う。
 const map = L.map("map").setView(KANTO_CENTER, 9);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  maxZoom: 19,
-}).addTo(map);
+L.tileLayer(
+  "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+  {
+    attribution:
+      'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 16,
+  }
+).addTo(map);
+// 地名・道路番号などのラベルは別レイヤー(Reference、背景透過)なので重ねて表示する
+L.tileLayer(
+  "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+  { maxZoom: 16 }
+).addTo(map);
+
+// 専用度合い(tier)ごとのスタイル。値が小さいほど「より専用」。
+// 東京都の自転車関連情報マップ(wagmap)の分類(自転車道/自転車歩行者道の分離方法/
+// 自転車専用通行帯/車道混在)を参考に段階分けした(2026-09-20)。
+// tier 5 (分離型自転車道)は道路ウェイの形状を近似として使っているため破線で区別する。
+// tier 6,7は経路探索の対象(専用道路)には含めない参考表示レイヤー。
+const TIER_STYLE = {
+  1: { color: "#08306b", weight: 2.6, opacity: 0.9, label: "完全専用(歩行者非対応)" },
+  2: { color: "#2171b5", weight: 2.2, opacity: 0.85, label: "専用・歩行者と分離" },
+  3: { color: "#6baed6", weight: 1.8, opacity: 0.8, label: "専用・歩行者共用" },
+  4: { color: "#9ecae1", weight: 1.5, opacity: 0.7, label: "専用(詳細不明)" },
+  5: { color: "#984ea3", weight: 2.2, opacity: 0.8, dashArray: "4,3", label: "分離型自転車道(車道沿い、近似)" },
+  6: { color: "#fdae61", weight: 1.3, opacity: 0.6, label: "(参考)自転車専用通行帯・ペイントのみ" },
+  7: { color: "#bdbdbd", weight: 1, opacity: 0.5, dashArray: "1,3", label: "(参考)車道混在・矢羽根等" },
+};
+
+function styleForFeature(feature) {
+  const tier = feature.properties.tier;
+  return TIER_STYLE[tier] || TIER_STYLE[4];
+}
 
 const cyclewayLayer = L.layerGroup().addTo(map);
+const referenceLayer = L.layerGroup().addTo(map);
 const searchLayer = L.layerGroup().addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
+
+function buildLegend() {
+  const el = document.getElementById("legend");
+  el.innerHTML = "";
+  for (const tier of [1, 2, 3, 4, 5, 6, 7]) {
+    const s = TIER_STYLE[tier];
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    const swatch = document.createElement("span");
+    swatch.className = "legend-swatch";
+    swatch.style.background = s.color;
+    if (s.dashArray) swatch.classList.add("dashed");
+    row.appendChild(swatch);
+    const text = document.createElement("span");
+    text.textContent = s.label;
+    row.appendChild(text);
+    el.appendChild(row);
+  }
+}
 
 let graph = null;
 let fromPoint = null; // {lon, lat, marker}
@@ -22,18 +75,28 @@ function geojsonToLatLngs(coords) {
 async function loadCyclewayNetwork() {
   const res = await fetch("data/cycleway_network.geojson");
   const geojson = await res.json();
-  L.geoJSON(geojson, {
-    style: { color: "#1f77b4", weight: 1.5, opacity: 0.6 },
-  }).addTo(cyclewayLayer);
+  L.geoJSON(geojson, { style: styleForFeature }).addTo(cyclewayLayer);
+  buildLegend();
   graph = CycleGraph.buildGraph(geojson);
   console.log(`cycleway graph: ${graph.nodeCoords.length} nodes`);
+}
+
+// 経路探索には使わない参考表示レイヤー(自転車専用通行帯・車道混在)。
+// 情報量が多いためデフォルトは非表示にし、チェックボックスで切り替える。
+async function loadReferenceInfrastructure() {
+  const res = await fetch("data/reference_infrastructure.geojson");
+  const geojson = await res.json();
+  L.geoJSON(geojson, { style: styleForFeature }).addTo(referenceLayer);
+  map.removeLayer(referenceLayer);
 }
 
 async function loadAttribution() {
   const res = await fetch("data/attribution.json");
   const attr = await res.json();
   document.getElementById("attribution-text").textContent =
-    `${attr.attribution_text}(${attr.license})。専用道路ネットワークは highway=cycleway をOverpass APIで抽出(2026-09-20)。`;
+    `${attr.attribution_text}(${attr.license})。地図タイル: © OpenStreetMap contributors, Tiles © Esri。` +
+    `専用道路ネットワークは highway=cycleway と cycleway=track系をOverpass APIで抽出(2026-09-20)。` +
+    `専用度合いの区分は東京都都市整備局の自転車関連情報マップの考え方を参考にした。`;
 }
 
 async function loadRoutesIndex() {
@@ -128,6 +191,19 @@ function runNearbySearch() {
     `(出発地・目的地から最寄りの専用道路まで、合計約 ${accessM} m の徒歩/一般道アクセスが別途必要です)</span>`;
 }
 
+document.getElementById("toggle-reference").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    map.addLayer(referenceLayer);
+  } else {
+    map.removeLayer(referenceLayer);
+  }
+});
+
 (async function init() {
-  await Promise.all([loadCyclewayNetwork(), loadAttribution(), loadRoutesIndex()]);
+  await Promise.all([
+    loadCyclewayNetwork(),
+    loadReferenceInfrastructure(),
+    loadAttribution(),
+    loadRoutesIndex(),
+  ]);
 })();

@@ -1,8 +1,12 @@
 input:
   cycleway_raw: "data/raw/osm_survey/kanto_independent_cycleway.json"
+  separated_track_raw: "data/raw/osm_survey/kanto_separated_track.json"
+  painted_lane_raw: "data/raw/osm_survey/kanto_painted_lane.json"
+  shared_lane_raw: "data/raw/osm_survey/kanto_shared_lane.json"
 
 output:
   cycleway_geojson: "docs/data/cycleway_network.geojson"
+  reference_geojson: "docs/data/reference_infrastructure.geojson"
   routes_dir: "docs/data/routes"
   routes_index: "docs/data/routes/index.json"
   attribution: "docs/data/attribution.json"

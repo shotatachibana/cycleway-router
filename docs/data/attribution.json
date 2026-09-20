@@ -3,5 +3,5 @@
   "license": "ODbL",
   "license_url": "https://opendatacommons.org/licenses/odbl/",
   "attribution_text": "© OpenStreetMap contributors",
-  "note": "highway=cycleway (independent dedicated cycleways) extracted via Overpass API, 2026-09-20"
+  "note": "専用道路ネットワーク(cycleway_network.geojson)は highway=cycleway と cycleway(:left/:right/:both)=track をOverpass APIで抽出(2026-09-20)。分離型自転車道(tier=5)は道路ウェイの形状を近似として使用しており、実際の自転車道部分のオフセット位置とは異なる場合がある。参考表示レイヤー(reference_infrastructure.geojson、tier=6,7)はcycleway=lane/shared_lane系。経路探索には使用していない。分類は東京都都市整備局の自転車関連情報マップ(https://www2.wagmap.jp/tokyo_tokeizu/)の考え方を参考にした。"
 }
