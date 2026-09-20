@@ -1,0 +1,37 @@
+# road_network の設定
+
+input:
+  pbf: "data/raw/osm_pbf/kanto-latest.osm.pbf"
+
+# 自転車が走行しうる一般道の道路クラス(日本の法規を踏まえた暫定案。要検証)
+highway_classes_include:
+  - primary
+  - primary_link
+  - secondary
+  - secondary_link
+  - tertiary
+  - tertiary_link
+  - trunk
+  - trunk_link
+  - unclassified
+  - residential
+  - living_street
+  - service
+  - track
+  - cycleway
+
+highway_classes_exclude:
+  - motorway
+  - motorway_link
+  - footway
+  - steps
+
+output:
+  filtered_pbf: "data/interim/osm_pbf/kanto_roads_filtered.osm.pbf"
+  size_table: "results/tables/road_network_size_comparison.csv"
+
+# ジオメトリ簡略化の比較候補(Douglas-Peucker許容誤差、メートル)
+simplify_tolerances_m: [0, 2, 5, 10]
+
+# 座標の丸め(小数点以下桁数。5桁 = 約1.1m精度)
+coordinate_precision_digits: 5

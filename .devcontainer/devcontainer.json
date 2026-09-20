@@ -1,0 +1,41 @@
+{
+  "name": "cycleway-router",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "vscode",
+
+  "features": {
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
+    // R5(r5py/r5r)はJDK 21以上を要求する。ここで入れたJDKをr5pyが使う。
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "21",
+      "jdkDistro": "tem"
+    }
+  },
+
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+  },
+
+  // フロントエンド(docs/)の確認用サーバ: python -m http.server 8000 --directory docs
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": {
+      "label": "docs/ の確認用サーバ(GitHub Pages相当)",
+      "onAutoForward": "notify"
+    }
+  },
+
+  "postCreateCommand": "pip install -r requirements.txt",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "anthropic.claude-code"
+      ]
+    }
+  }
+}

@@ -1,0 +1,20 @@
+# 暫定(バージョン未固定)。初回ビルドが通ったら `pip freeze` を見て主要なものを固定すること。
+
+# 経路検索(R5のPythonラッパー。JDK 21以上が必要 → devcontainer.jsonのfeatureで導入済み)
+r5py
+
+# OSMデータの読み込み・加工・地理データ処理
+osmium          # pyosmium: PBFをPythonから走査
+geopandas
+shapely
+pyproj
+pandas
+networkx        # 連結成分の集計・ブラウザ側探索方式の試作用
+scipy           # cKDTreeによる近傍点探索(連結性分析)
+
+# 取得・設定・検証
+requests
+pyyaml
+matplotlib
+folium
+pytest

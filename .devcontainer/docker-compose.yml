@@ -1,0 +1,21 @@
+services:
+  # Claude Code・データ処理・R5(r5py)・フロントエンドの確認をすべて動かす開発コンテナ。
+  # 以前のpaper-voice-pipelineと違い、別コンテナ(VOICEVOX等)は不要。appサービス1つで完結する。
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      # リポジトリ全体を /workspace にbind mount(ホスト側に実体が残る)
+      # docker-compose.yml は .devcontainer/ 直下にあるため、1階層上(リポジトリ直下)を指定する
+      - ..:/workspace:cached
+      # Claude Codeの認証情報などをコンテナ再作成後も残すための名前付きボリューム
+      - claude-code-config:/home/vscode/.claude
+    command: sleep infinity
+    # R5はメモリを比較的多く使う。Docker Desktop(WSL2)側に割り当てたメモリが上限になるので、
+    # 大きい地域を扱うときは .wslconfig の memory を増やすこと(README参照)。
+    # コンテナ単位で上限を掛けたい場合は下を有効にする:
+    # mem_limit: 8g
+
+volumes:
+  claude-code-config:

@@ -1,0 +1,4 @@
+condition,ways,unique_nodes,pbf_size_mb,geojson_size_mb,geojson_gzip_mb,note
+full_kanto_pbf,-,-,486,-,-,Geofabrik kanto-latest.osm.pbf (2026-09-19時点、全タグ込み)
+filtered_all_road_classes,1834081,9547506,111,449,65,"primary/secondary/tertiary/trunk(+link)/unclassified/residential/living_street/service/track/cyclewayを含む。motorway・footwayは除外。座標は小数点5桁(約1.1m精度)"
+independent_cycleway_only,11056,-,-,8,-,"参考: src/osm_survey/で取得済みのhighway=cyclewayのみ(クライアント配信中の既存データ)"

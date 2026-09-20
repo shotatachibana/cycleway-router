@@ -1,0 +1,12 @@
+input:
+  cycleway_raw: "data/raw/osm_survey/kanto_independent_cycleway.json"
+
+output:
+  cycleway_geojson: "docs/data/cycleway_network.geojson"
+  routes_dir: "docs/data/routes"
+  routes_index: "docs/data/routes/index.json"
+  attribution: "docs/data/attribution.json"
+
+coordinate_precision_digits: 6
+cycleway_buffer_m: 15
+metric_crs: "EPSG:32654"

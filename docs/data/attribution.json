@@ -1,0 +1,7 @@
+{
+  "source": "OpenStreetMap contributors",
+  "license": "ODbL",
+  "license_url": "https://opendatacommons.org/licenses/odbl/",
+  "attribution_text": "© OpenStreetMap contributors",
+  "note": "highway=cycleway (independent dedicated cycleways) extracted via Overpass API, 2026-09-20"
+}

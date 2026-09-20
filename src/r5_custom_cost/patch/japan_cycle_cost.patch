@@ -1,0 +1,142 @@
+diff --git a/src/main/java/com/conveyal/r5/point_to_point/PointToPointRouterServer.java b/src/main/java/com/conveyal/r5/point_to_point/PointToPointRouterServer.java
+index eea4a2f..b46a38e 100644
+--- a/src/main/java/com/conveyal/r5/point_to_point/PointToPointRouterServer.java
++++ b/src/main/java/com/conveyal/r5/point_to_point/PointToPointRouterServer.java
+@@ -371,7 +371,10 @@ public class PointToPointRouterServer {
+             streetRouter.streetMode = streetMode;
+ 
+             // TODO use target pruning instead of a distance limit
+-            streetRouter.distanceLimitMeters = 100_000;
++            // cycleway-router project: raised from the original demo's 100_000 (100km) because real target
++            // routes (e.g. Shinagawa-Takasaki, ~102km straight-line) exceed that. 400km comfortably covers
++            // any realistic point pair within Kanto.
++            streetRouter.distanceLimitMeters = 400_000;
+             //Split for end coordinate
+             if (!streetRouter.setDestination(profileRequest.toLat, profileRequest.toLon)) {
+                 content.put("errors", "Edge near the end coordinate wasn't found. Routing didn't start!");
+diff --git a/src/main/java/com/conveyal/r5/streets/EdgeTraversalTimes.java b/src/main/java/com/conveyal/r5/streets/EdgeTraversalTimes.java
+index 07d515b..360abbb 100644
+--- a/src/main/java/com/conveyal/r5/streets/EdgeTraversalTimes.java
++++ b/src/main/java/com/conveyal/r5/streets/EdgeTraversalTimes.java
+@@ -4,9 +4,6 @@ import com.conveyal.osmlib.Way;
+ import com.conveyal.r5.profile.ProfileRequest;
+ import com.conveyal.r5.profile.StreetMode;
+ 
+-import static com.conveyal.r5.streets.LaDotCostTags.Direction.BACKWARD;
+-import static com.conveyal.r5.streets.LaDotCostTags.Direction.FORWARD;
+-
+ /**
+  * Groups together SingleModeTraversalTimes for walking and biking.
+  */
+@@ -42,14 +39,19 @@ public class EdgeTraversalTimes implements TraversalTimeCalculator {
+         }
+     }
+ 
++    // cycleway-router project: dedicated cycleway / general road classification is symmetric (does not
++    // depend on direction), unlike LaDot's AADT-based tags, so a single JapanCycleCostTags instance
++    // covers both the forward and backward edge of the pair.
+     public void setEdgePair (int forwardEdge, Way way) {
+         int backwardEdge = forwardEdge + 1;
+-        LaDotCostTags forwardTags = new LaDotCostTags(way, FORWARD);
+-        walkTraversalTimes.setOneEdge(forwardEdge, new LaDotWalkCostSupplier(forwardTags));
+-        bikeTraversalTimes.setOneEdge(forwardEdge, new LaDotBikeCostSupplier(forwardTags));
+-        LaDotCostTags backwardTags = new LaDotCostTags(way, BACKWARD);
+-        walkTraversalTimes.setOneEdge(backwardEdge, new LaDotWalkCostSupplier(backwardTags));
+-        bikeTraversalTimes.setOneEdge(backwardEdge, new LaDotBikeCostSupplier(backwardTags));
++        JapanCycleCostTags cycleTags = new JapanCycleCostTags(way);
++        bikeTraversalTimes.setOneEdge(forwardEdge, new JapanCycleCostSupplier(cycleTags));
++        bikeTraversalTimes.setOneEdge(backwardEdge, new JapanCycleCostSupplier(cycleTags));
++        // Walking is out of scope for this project (see CLAUDE.md 非ゴール) - use neutral costs so
++        // walk-mode routing (used internally by some R5 code paths) is unaffected and never throws on
++        // plain OSM data that lacks LaDot's externally-injected tags.
++        walkTraversalTimes.setOneEdge(forwardEdge, 1.0, 0, 0, 0);
++        walkTraversalTimes.setOneEdge(backwardEdge, 1.0, 0, 0, 0);
+     }
+ 
+     public void summarize () {
+diff --git a/src/main/java/com/conveyal/r5/streets/JapanCycleCostSupplier.java b/src/main/java/com/conveyal/r5/streets/JapanCycleCostSupplier.java
+new file mode 100644
+index 0000000..b999862
+--- /dev/null
++++ b/src/main/java/com/conveyal/r5/streets/JapanCycleCostSupplier.java
+@@ -0,0 +1,42 @@
++package com.conveyal.r5.streets;
++
++/**
++ * cycleway-router project: prefers dedicated cycleways / separated tracks over general roads.
++ * Unlike LaDotBikeCostSupplier, this needs no external traffic/slope data - only standard OSM tags
++ * (see JapanCycleCostTags). Implements the policy from CLAUDE.md "専用道路の定義" (iii):
++ * dedicated cycleway infrastructure is traversed at its real distance; general roads are scaled up
++ * by a penalty factor so that shortest-path search naturally minimizes general-road usage. R5 has no
++ * native mechanism for a hard cap on total general-road distance, so this is a soft (multiplicative)
++ * penalty only - see instruction.md for the reasoning and the follow-up post-hoc length check.
++ */
++public class JapanCycleCostSupplier implements SingleModeTraversalTimes.Supplier {
++
++    /**
++     * Default multiplier applied to general-road distance relative to dedicated cycleway infrastructure.
++     * Tunable without recompiling via -DjapanCycle.generalRoadPenalty=<double>. Not yet confirmed with
++     * the project owner - see instruction.md "確認してほしいこと".
++     */
++    public static final double DEFAULT_GENERAL_ROAD_PENALTY =
++            Double.parseDouble(System.getProperty("japanCycle.generalRoadPenalty", "5.0"));
++
++    private final JapanCycleCostTags tags;
++
++    public JapanCycleCostSupplier (JapanCycleCostTags tags) {
++        this.tags = tags;
++    }
++
++    @Override
++    public double perceivedLengthMultipler () {
++        if (tags.isDedicatedOrSeparated()) {
++            return 1.0;
++        }
++        return DEFAULT_GENERAL_ROAD_PENALTY;
++    }
++
++    @Override
++    public int turnTimeSeconds (SingleModeTraversalTimes.TurnDirection turnDirection) {
++        // Signal/crossing turn penalties are a future extension (see CLAUDE.md 「専用道路の定義」
++        // の交差点の短い横断の扱い); not modeled yet.
++        return 0;
++    }
++}
+diff --git a/src/main/java/com/conveyal/r5/streets/JapanCycleCostTags.java b/src/main/java/com/conveyal/r5/streets/JapanCycleCostTags.java
+new file mode 100644
+index 0000000..23f7c40
+--- /dev/null
++++ b/src/main/java/com/conveyal/r5/streets/JapanCycleCostTags.java
+@@ -0,0 +1,32 @@
++package com.conveyal.r5.streets;
++
++import com.conveyal.osmlib.Way;
++
++/**
++ * cycleway-router project: reads plain standard OSM tags (no external data injection required, unlike
++ * LaDotCostTags) to classify a way as dedicated cycleway infrastructure or general road.
++ * See CLAUDE.md "専用道路の定義" and src/r5_custom_cost/instruction.md for the policy this implements.
++ */
++public class JapanCycleCostTags {
++
++    final boolean isDedicatedCycleway;
++    final boolean isSeparatedTrack;
++    final String highway;
++
++    public JapanCycleCostTags (Way way) {
++        highway = nullToEmpty(way.getTag("highway"));
++        isDedicatedCycleway = "cycleway".equals(highway);
++        isSeparatedTrack = "track".equals(way.getTag("cycleway"))
++                || "track".equals(way.getTag("cycleway:left"))
++                || "track".equals(way.getTag("cycleway:right"))
++                || "track".equals(way.getTag("cycleway:both"));
++    }
++
++    boolean isDedicatedOrSeparated () {
++        return isDedicatedCycleway || isSeparatedTrack;
++    }
++
++    private static String nullToEmpty (String s) {
++        return s == null ? "" : s;
++    }
++}

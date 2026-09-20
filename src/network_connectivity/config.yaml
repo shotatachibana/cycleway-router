@@ -1,0 +1,15 @@
+# network_connectivity の設定
+
+input:
+  independent_cycleway_json: "data/raw/osm_survey/kanto_independent_cycleway.json"
+
+# ノードのスナップ許容誤差(メートル)。0はOSMノード共有(完全一致)のみ。
+snap_tolerances_m: [0, 5, 10, 20, 50]
+
+metric_crs: "EPSG:32654"  # UTM zone 54N
+
+output:
+  summary_table: "results/tables/connectivity_kanto_by_tolerance.csv"
+  top10_table: "results/tables/connectivity_kanto_components_top10.csv"
+  map_prefix: "results/figures/connectivity_kanto_map_tol"
+  map_tolerances_m: [0, 20]  # 地図を作る許容誤差(結果を見て後で調整可)

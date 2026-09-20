@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>自転車専用道路 経路検索(関東・試作版)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<div id="sidebar">
+  <h1>自転車専用道路 経路検索<span class="badge">試作版</span></h1>
+
+  <section>
+    <h2>近距離検索(専用道路ネットワークのみ)</h2>
+    <p class="hint">
+      地図をクリックして出発地・目的地を指定してください。自転車専用道路
+      (<code>highway=cycleway</code>)だけをブラウザ内でつないだ経路を探します。
+      専用道路網は地域ごとに分断されているため、離れた地点間では「経路が
+      見つかりません」と表示されることがあります(その場合は下の事前計算ルートを
+      確認してください)。
+    </p>
+    <div class="row">
+      <button id="btn-set-from">① 出発地をセット</button>
+      <button id="btn-set-to">② 目的地をセット</button>
+      <button id="btn-clear">クリア</button>
+    </div>
+    <div id="nearby-result" class="result"></div>
+  </section>
+
+  <section>
+    <h2>長距離ルート(事前計算済み)</h2>
+    <p class="hint">
+      専用道路ネットワークが分断されていて近距離検索では届かないような長距離の
+      行き先は、開発コンテナ内でR5(専用道路優先のカスタムコスト付き)を使って
+      あらかじめ計算した結果をここに置いています。任意の2地点ではなく、
+      登録済みの行き先から選ぶ形式です。
+    </p>
+    <select id="route-select">
+      <option value="">-- ルートを選択 --</option>
+    </select>
+    <div id="route-result" class="result"></div>
+  </section>
+
+  <section id="attribution-section">
+    <h2>出典</h2>
+    <p id="attribution-text" class="hint"></p>
+  </section>
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="assets/graph.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>

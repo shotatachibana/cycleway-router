@@ -1,0 +1,29 @@
+# 生データ・中間データ(容量が大きい。取得スクリプトで再現する)
+data/raw/*
+data/interim/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+
+# R5が作るネットワークキャッシュ
+*.dat
+network.dat
+
+# R5本体のソース(外部リポジトリのクローン。フォークして自作コストを追加する作業場所)
+src/r5_custom_cost/r5-src/
+src/r5_custom_cost/build/
+*.jar
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# 秘密情報
+.env
+.devcontainer/.env
+
+# OS・エディタ
+.DS_Store
+Thumbs.db

@@ -1,0 +1,46 @@
+# osm_survey の設定
+# CLAUDE.md「実験管理をしやすいようにする」方針に従い、対象地域・タグ条件を外出しする。
+
+region:
+  name: "関東地方"
+  # OSM relation id (boundary=civil, admin_level=3)。2026-09-20にOverpassで確認済み。
+  osm_relation_id: 1803923
+
+overpass:
+  # 406を返すエンドポイントを避けるため、複数ミラーを順に試す
+  endpoints:
+    - "https://overpass-api.de/api/interpreter"
+    - "https://overpass.private.coffee/api/interpreter"
+  user_agent: "cycleway-router-research/0.1 (personal project; contact via GitHub issue)"
+  timeout_s: 180
+
+# CLAUDE.md「『専用道路』の定義」に対応するタグ条件
+tags:
+  independent_cycleway:
+    # 車道から独立したcycleway(自転車専用・歩行者共用サイクリングロード双方を含む)
+    key: "highway"
+    value: "cycleway"
+  separated_track:
+    # 車道沿いの分離型自転車道(道路ウェイ側にタグ付けされるもの)
+    keys:
+      - "cycleway"
+      - "cycleway:left"
+      - "cycleway:right"
+      - "cycleway:both"
+    value: "track"
+
+attributes_to_summarize:
+  - foot
+  - segregated
+  - bicycle
+  - surface
+  - lit
+
+output:
+  raw_dir: "data/raw/osm_survey"
+  raw_geojson: "data/raw/osm_survey/kanto_cycleway_raw.geojson"
+  raw_json_independent: "data/raw/osm_survey/kanto_independent_cycleway.json"
+  raw_json_separated: "data/raw/osm_survey/kanto_separated_track.json"
+  table: "results/tables/osm_survey_kanto_summary.csv"
+  table_by_prefecture: "results/tables/osm_survey_kanto_by_prefecture.csv"
+  map_png: "results/figures/osm_survey_kanto_map.png"

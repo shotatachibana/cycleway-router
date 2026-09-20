@@ -1,0 +1,10 @@
+# 使用するデータの一覧(出典URL・取得日・ライセンス・必要な出典表記を必ず記録する)
+# 形式: 名前 | 用途 | 出典URL | 取得日 | ライセンス | 出典表記
+#
+# 例(取得後に埋める):
+# OSM(Geofabrik Japan) | 主データ: highway=cycleway等 | https://download.geofabrik.de/asia/japan.html | 未取得 | ODbL | © OpenStreetMap contributors
+# 東京都建設局 自転車走行空間 整備済区間 | 検証・補完用 | 【要確認】 | 未取得 | CC BY 4.0(推定・要確認) | 【要確認】
+
+OSM(Overpass API, 関東地方 highway=cycleway) | osm_survey: 独立cyclewayの延長・属性集計 | https://overpass-api.de/api/interpreter (query: src/osm_survey/fetch_overpass.py:build_independent_cycleway_query) | 2026-09-20 | ODbL | © OpenStreetMap contributors
+OSM(Overpass API, 関東地方 cycleway(:left/:right/:both)=track) | osm_survey: 車道沿い分離型自転車道の延長集計 | https://overpass-api.de/api/interpreter (query: src/osm_survey/fetch_overpass.py:build_separated_track_query) | 2026-09-20 | ODbL | © OpenStreetMap contributors
+OSM(Overpass API, 関東地方 admin_level=4 都県境界) | osm_survey: 都県別集計用の境界ポリゴン | https://overpass-api.de/api/interpreter (query: src/osm_survey/fetch_overpass.py:build_prefecture_query) | 2026-09-20 | ODbL | © OpenStreetMap contributors
