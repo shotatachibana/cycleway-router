@@ -28,6 +28,14 @@ const CAR_ROAD_LAYER_PATTERN = /^(road|bridge|tunnel)_(motorway|trunk_primary|se
 const CAR_ROAD_WIDTH_FACTOR = 0.45;
 const CAR_ROAD_COLOR = { casing: "#e3ddd2", fill: "#d8cfc0" };
 
+// NAVITIME風の「クリーム色の地面」に寄せる(自転車道の緑を映えさせる)。
+const BACKGROUND_COLOR = "#f7f2e7";
+// libertyの緑系の土地被覆(森・草地・公園)は自転車道の緑と競合するので薄くする。
+// レイヤーIDが違って一致しない場合は何も起きない(害は無い)。
+// 実際のIDは console.log(style.layers.map(l => l.id)) で確認できる。
+const LAND_FILL_MUTE_PATTERN = /^(landcover_wood|landcover_grass|park|landuse_park|landuse_cemetery)/;
+const LAND_FILL_MUTE_COLOR = "#ebeedd";
+
 function scaleWidthExpression(expr, factor) {
   if (!Array.isArray(expr)) return typeof expr === "number" ? expr * factor : expr;
   if (expr[0] !== "interpolate") return expr;
@@ -76,6 +84,12 @@ async function loadFlattenedStyle() {
   style.layers = style.layers
     .filter((l) => l.id !== "building-3d")
     .map((l) => {
+      if (l.id === "background") {
+        return { ...l, paint: { ...l.paint, "background-color": BACKGROUND_COLOR } };
+      }
+      if (l.type === "fill" && LAND_FILL_MUTE_PATTERN.test(l.id)) {
+        return { ...l, paint: { ...l.paint, "fill-color": LAND_FILL_MUTE_COLOR } };
+      }
       if (ROAD_SHIELD_LAYER_IDS.includes(l.id)) {
         return { ...l, layout: { ...l.layout, visibility: "none" } };
       }
@@ -111,16 +125,25 @@ let map;
 // 自転車専用通行帯/車道混在)を参考に段階分けした(2026-09-20)。
 // tier 6,7は経路探索の対象(専用道路)には含めない参考表示レイヤー
 // (ただし近距離検索では専用道路が繋がらない場合の探索対象として使う)。
+// 日本の高速道路地図(緑色の路線・標識風のラベル)を意識した配色にしている
+// (2026-09-21、ユーザー方針: 「サイクリングロードは日本の高速道路のように」)。
+// 2026-09-22: NAVITIME風に、明るすぎる緑を避けて中間の緑に揃え、濃い緑の縁取りで
+// 輪郭を出す方針に変更した。
 const TIER_STYLE = {
-  1: { color: "#0d47a1", weight: 2.6, label: "完全専用(歩行者非対応)" },
-  2: { color: "#1976d2", weight: 2.2, label: "専用・歩行者と分離" },
-  3: { color: "#42a5f5", weight: 1.8, label: "専用・歩行者共用" },
-  4: { color: "#90caf9", weight: 1.5, label: "専用(詳細不明)" },
-  5: { color: "#984ea3", weight: 2.2, dashed: true, label: "分離型自転車道(車道沿い、近似)" },
+  1: { color: "#3f9d4b", weight: 3.0, label: "完全専用(歩行者非対応)" },
+  2: { color: "#3f9d4b", weight: 2.6, label: "専用・歩行者と分離" },
+  3: { color: "#4fae5a", weight: 2.2, label: "専用・歩行者共用" },
+  4: { color: "#6cc077", weight: 1.9, label: "専用(詳細不明)" },
+  5: { color: "#3f9d4b", weight: 2.4, dashed: true, label: "分離型自転車道(車道沿い、近似)" },
   6: { color: "#e6550d", weight: 2.4, label: "(参考)自転車専用通行帯・ペイントのみ" },
   7: { color: "#636363", weight: 2, dashed: true, label: "(参考)車道混在・矢羽根等" },
   8: { color: "#252525", weight: 2, label: "一般道路(地図上には表示しない)" },
 };
+
+// 高速道路風の縁取りと標識に使う色。
+const CASING_COLOR = "#1b5e2c";
+const SIGN_FILL_COLOR = "#1f7a3a";
+const ROUTE_RESULT_COLOR = "#1e6bff"; // 近距離検索の経路。緑の専用道路と同化しないよう青にする
 
 // 近距離検索は「専用道路(tier1-5)を最優先、繋がらなければ自転車レーン・車道混在
 // (tier6,7)、それでも繋がらなければ一般道路網タイル(tier8)もペナルティ付きで使う」
@@ -190,7 +213,7 @@ function tierMatchExpression(field, defaultValue) {
 // ["match",tier,["interpolate",zoom,...],...] のようにmatchの中にinterpolateを
 // 複数個ネストするのはNGなので、必ず一番外側をズームのinterpolateにし、
 // 各ズーム段階の値としてtierごとのmatchを埋め込む形にする。
-const WIDTH_ZOOM_STOPS = [8, 2.2, 12, 3.2, 16, 4.8, 20, 7];
+const WIDTH_ZOOM_STOPS = [8, 2.6, 12, 4, 16, 6.5, 20, 10];
 
 function tierWidthExpression(defaultWeight, multiplier) {
   const m = multiplier || 1;
@@ -246,13 +269,66 @@ let lastPrecomputedRoute = null; // {coords, name}
 
 const EMPTY_FC = { type: "FeatureCollection", features: [] };
 
+// ---- 高速道路風の路線番号バッジ(NAVITIMEの「E6」「C3」のようなもの) ----
+
+// データにrefが無いので、名称のある路線に出現順で「C1, C2, ...」を振る。
+// 番号を固定したい場合は、データ生成側でproperties.refを持たせればそちらを優先する。
+const refByName = new Map();
+function assignRefs(geojson) {
+  for (const f of geojson.features) {
+    const p = f.properties || (f.properties = {});
+    if (p.ref) continue;
+    const n = p.name;
+    if (!n) continue;
+    if (!refByName.has(n)) refByName.set(n, "C" + (refByName.size + 1));
+    p.ref = refByName.get(n);
+  }
+}
+
+// 角丸の四角を描く(ctx.roundRectが無い古い環境でも動くよう自前で実装)。
+function roundedRectPath(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.lineTo(x + w - r, y);
+  g.quadraticCurveTo(x + w, y, x + w, y + r);
+  g.lineTo(x + w, y + h - r);
+  g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  g.lineTo(x + r, y + h);
+  g.quadraticCurveTo(x, y + h, x, y + h - r);
+  g.lineTo(x, y + r);
+  g.quadraticCurveTo(x, y, x + r, y);
+  g.closePath();
+}
+
+// 「白い縁+緑地」の角丸バッジ画像を1回だけ登録する。テキスト幅に合わせて
+// 中央部分だけ伸びるよう、stretchX/stretchY/contentを指定している。
+function addSignImage() {
+  if (map.hasImage("cycleway-sign")) return;
+  const size = 32, r = 8;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+  g.fillStyle = "#ffffff";
+  roundedRectPath(g, 0, 0, size, size, r);
+  g.fill();
+  g.fillStyle = SIGN_FILL_COLOR;
+  roundedRectPath(g, 2, 2, size - 4, size - 4, r - 2);
+  g.fill();
+  map.addImage("cycleway-sign", g.getImageData(0, 0, size, size), {
+    stretchX: [[10, 22]],
+    stretchY: [[10, 22]],
+    content: [10, 10, 22, 22],
+  });
+}
+
 // MapLibreのline-dasharrayはデータ駆動の式(match/case)に対応していないため
 // (定数配列しか指定できない)、破線が必要なtierは別レイヤーに分ける。
-// 高速道路のような縁取り(casing、薄い色で少し太いラインを下に敷く)を追加して、
+// 高速道路のような縁取り(casing、濃い緑で少し太いラインを下に敷く)を追加して、
 // 自転車専用道路が地図上で一番目立つように強調する。
 async function loadCyclewayNetwork() {
   const res = await fetch("data/cycleway_network.geojson");
   cyclewayGeojson = await res.json();
+  assignRefs(cyclewayGeojson);
   map.addSource("cycleway", { type: "geojson", data: cyclewayGeojson });
   map.addLayer({
     id: "cycleway-line-casing",
@@ -260,9 +336,9 @@ async function loadCyclewayNetwork() {
     source: "cycleway",
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
-      "line-color": "#ffffff",
-      "line-width": tierWidthExpression(1.5, 1.8),
-      "line-opacity": 0.9,
+      "line-color": CASING_COLOR,
+      "line-width": tierWidthExpression(1.5, 1.45),
+      "line-opacity": 1,
     },
   });
   map.addLayer({
@@ -272,7 +348,7 @@ async function loadCyclewayNetwork() {
     filter: ["!=", ["get", "tier"], 5],
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
-      "line-color": tierMatchExpression("color", "#1f77b4"),
+      "line-color": tierMatchExpression("color", "#3f9d4b"),
       "line-width": tierWidthExpression(1.5),
     },
   });
@@ -288,13 +364,17 @@ async function loadCyclewayNetwork() {
       "line-dasharray": [2, 1.5],
     },
   });
-  // サイクリングロードの名称(例: 「多摩川サイクリングロード」)が分かっているものは
-  // 経路に沿って表示する(道路番号シールドは非表示にした代わりに、こちらは残す)。
+
+  addSignImage();
+
+  // サイクリングロードの名称(例: 「多摩川サイクリングロード」)は経路に沿って表示する。
+  // 白文字+緑の縁取りの文字ラベル。路線番号バッジと役割を分けるため、やや寄ったズームでだけ出す。
   map.addLayer({
     id: "cycleway-name-label",
     type: "symbol",
     source: "cycleway",
     filter: ["has", "name"],
+    minzoom: 12,
     layout: {
       "symbol-placement": "line",
       "text-field": ["get", "name"],
@@ -303,11 +383,36 @@ async function loadCyclewayNetwork() {
       "symbol-spacing": 300,
     },
     paint: {
-      "text-color": "#08306b",
-      "text-halo-color": "#ffffff",
-      "text-halo-width": 1.5,
+      "text-color": "#ffffff",
+      "text-halo-color": CASING_COLOR,
+      "text-halo-width": 3,
     },
   });
+
+  // 路線番号バッジ(緑の角丸+白文字)。路線に沿って一定間隔で繰り返し置く。
+  // 線の向きに回転せず、常に水平に表示する(NAVITIMEの「E6」「C3」と同じ見せ方)。
+  map.addLayer({
+    id: "cycleway-ref-badge",
+    type: "symbol",
+    source: "cycleway",
+    filter: ["has", "ref"],
+    minzoom: 10,
+    layout: {
+      "symbol-placement": "line",
+      "symbol-spacing": 500,
+      "text-field": ["get", "ref"],
+      "text-size": 12,
+      "text-font": ["Noto Sans Bold"],
+      "text-rotation-alignment": "viewport",
+      "icon-rotation-alignment": "viewport",
+      "icon-image": "cycleway-sign",
+      "icon-text-fit": "both",
+      "icon-text-fit-padding": [2, 5, 2, 5],
+      "text-padding": 2,
+    },
+    paint: { "text-color": "#ffffff" },
+  });
+
   buildLegend();
   maybeBuildRoutingGraph();
 }
@@ -346,11 +451,67 @@ let baseReferenceGraph = null;
 const loadedTileGraphs = new Map(); // "col_row" -> graph
 let tileIndex = null; // docs/data/tiles/index.json
 
+// 高速道路のIC/JCT表現を意識し、専用道路が3方向以上に分岐する地点(合流・分岐点)に
+// 印を付ける(2026-09-21、ユーザー方針)。
+// 接続するエッジが name を持っている場合は、その名前をpropertiesに入れて
+// JCT名ラベルとして表示する(nameが無ければラベルは出ないだけで、害は無い)。
+function computeJunctions(graph) {
+  const features = [];
+  for (let i = 0; i < graph.adjacency.length; i++) {
+    const distinctNeighbors = new Set(graph.adjacency[i].map((e) => e.to));
+    if (distinctNeighbors.size >= 3) {
+      const [lon, lat] = graph.nodeCoords[i];
+      const names = [...new Set(graph.adjacency[i].map((e) => e.name).filter(Boolean))];
+      const properties = names.length ? { name: names[0] } : {};
+      features.push({ type: "Feature", properties, geometry: { type: "Point", coordinates: [lon, lat] } });
+    }
+  }
+  return { type: "FeatureCollection", features };
+}
+
+function addJunctionLayer(graph) {
+  const data = computeJunctions(graph);
+  map.addSource("cycleway-junctions", { type: "geojson", data });
+  map.addLayer({
+    id: "cycleway-junctions",
+    type: "circle",
+    source: "cycleway-junctions",
+    minzoom: 12,
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 3, 15, 5, 18, 8],
+      "circle-color": "#ffffff",
+      "circle-stroke-color": CASING_COLOR,
+      "circle-stroke-width": 2,
+    },
+  });
+  // JCT名の緑バッジ(名前が取れた交点だけ)。
+  map.addLayer({
+    id: "cycleway-junction-label",
+    type: "symbol",
+    source: "cycleway-junctions",
+    filter: ["has", "name"],
+    minzoom: 13,
+    layout: {
+      "text-field": ["get", "name"],
+      "text-size": 11,
+      "text-font": ["Noto Sans Regular"],
+      "text-offset": [0, 1.4],
+      "text-anchor": "top",
+      "icon-image": "cycleway-sign",
+      "icon-text-fit": "both",
+      "icon-text-fit-padding": [2, 4, 2, 4],
+      "text-optional": true,
+    },
+    paint: { "text-color": "#ffffff" },
+  });
+}
+
 function maybeBuildRoutingGraph() {
   if (!cyclewayGeojson || !referenceGeojson) return;
   baseCyclewayGraph = CycleGraph.buildGraph(cyclewayGeojson, weightForFeature);
   baseReferenceGraph = CycleGraph.buildGraph(referenceGeojson, weightForFeature);
   rebuildCombinedGraph();
+  addJunctionLayer(baseCyclewayGraph);
 }
 
 function rebuildCombinedGraph() {
@@ -442,9 +603,11 @@ async function loadRoutesIndex() {
     const routeRes = await fetch(`data/${select.value}`);
     const routeGeojson = await routeRes.json();
     map.getSource("route-result").setData({ type: "FeatureCollection", features: [routeGeojson] });
-    fitRouteBounds(routeGeojson.geometry.coordinates);
+    const coords = routeGeojson.geometry.coordinates;
+    fitRouteBounds(coords);
     const p = routeGeojson.properties;
     resultDiv.innerHTML = `<span class="ok">${p.name}: 距離 ${p.length_km} km、専用道路上 ${Math.round(p.cycleway_share * 100)}%</span>`;
+    // 修正: 以前は coords が未定義でGPXダウンロード時にエラーになっていた。
     lastPrecomputedRoute = { coords, name: p.name };
     gpxBtn.classList.remove("hidden");
   });
@@ -692,6 +855,7 @@ const INFO_LAYER_IDS = ["cycleway-line-solid", "cycleway-line-dashed", "referenc
 function formatRoadInfoPopup(props, lngLat) {
   const tierLabel = (TIER_STYLE[props.tier] || {}).label || "不明";
   const name = props.name || "(名称不明の区間)";
+  const refText = props.ref ? `[${props.ref}] ` : "";
   const attrs = [];
   if (props.surface) attrs.push(`路面: ${props.surface}`);
   if (props.foot) attrs.push(`歩行者: ${props.foot}`);
@@ -701,7 +865,7 @@ function formatRoadInfoPopup(props, lngLat) {
   const svUrl = `https://www.google.com/maps?layer=c&cbll=${lngLat.lat},${lngLat.lng}`;
   return (
     `<div style="font-size:0.8rem;max-width:240px;">` +
-    `<div style="font-weight:bold;margin-bottom:2px;">${name}</div>` +
+    `<div style="font-weight:bold;margin-bottom:2px;">${refText}${name}</div>` +
     `<div>${tierLabel}</div>${attrsHtml}` +
     `<div style="margin-top:6px;">` +
     `<a href="${osmUrl}" target="_blank" rel="noopener">OSMで詳細を見る(way ${props.id})</a><br>` +
@@ -749,13 +913,14 @@ function attachMapHandlers() {
     ]);
     attachRoadInfoPopups();
 
+    // 近距離検索の経路は、緑の専用道路と同化しないよう青にする。
     map.addSource("search-result", { type: "geojson", data: EMPTY_FC });
     map.addLayer({
       id: "search-result-line",
       type: "line",
       source: "search-result",
       layout: { "line-cap": "round", "line-join": "round" },
-      paint: { "line-color": "#2ca02c", "line-width": 4 },
+      paint: { "line-color": ROUTE_RESULT_COLOR, "line-width": 6 },
     });
     map.addSource("route-result", { type: "geojson", data: EMPTY_FC });
     map.addLayer({

@@ -129,8 +129,15 @@ cycleway-router/
 - `docs/`にフロントエンド(Leaflet)を実装済み: 専用道路網のみを使った近距離の
   クライアントサイド経路検索(ブラウザ内Dijkstra)と、事前計算した長距離ルートの
   選択・表示の両方が動作する(`src/export_web/`でデータを生成)
-- **GitHub Pagesへの実際のデプロイ・公開設定はまだ行っていない**。ローカルでの
-  動作確認(`python -m http.server`+Playwrightでのブラウザ自動操作)のみ完了
+- GitHub Pagesで公開中: https://shotatachibana.github.io/cycleway-router/
+  (背景地図はMapLibre GL JS + OpenFreeMapに変更済み。地図タイル・地名検索
+  (Nominatim)・GPXダウンロード等の詳細はCLAUDE.mdを参照)
+
+**今後の検討事項(未着手)**: R5を活かした自転車+鉄道(輪行)のマルチモーダル
+経路検索。サイクルトレイン優先・混雑路線回避などの要望あり。実現可能性の調査
+結果はCLAUDE.mdの「非ゴール」節を参照(GTFSデータ入手・R5との互換性確認・
+サイクルトレイン情報の手動キュレーションが必要で、着手する場合は一部事業者に
+絞った小規模プロトタイプからが現実的という結論)。
 
 詳細な経緯は[`log.md`](log.md)、方針は[`CLAUDE.md`](CLAUDE.md)を参照。
 
