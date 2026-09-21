@@ -112,10 +112,10 @@ let map;
 // tier 6,7は経路探索の対象(専用道路)には含めない参考表示レイヤー
 // (ただし近距離検索では専用道路が繋がらない場合の探索対象として使う)。
 const TIER_STYLE = {
-  1: { color: "#08306b", weight: 2.6, label: "完全専用(歩行者非対応)" },
-  2: { color: "#2171b5", weight: 2.2, label: "専用・歩行者と分離" },
-  3: { color: "#6baed6", weight: 1.8, label: "専用・歩行者共用" },
-  4: { color: "#9ecae1", weight: 1.5, label: "専用(詳細不明)" },
+  1: { color: "#0d47a1", weight: 2.6, label: "完全専用(歩行者非対応)" },
+  2: { color: "#1976d2", weight: 2.2, label: "専用・歩行者と分離" },
+  3: { color: "#42a5f5", weight: 1.8, label: "専用・歩行者共用" },
+  4: { color: "#90caf9", weight: 1.5, label: "専用(詳細不明)" },
   5: { color: "#984ea3", weight: 2.2, dashed: true, label: "分離型自転車道(車道沿い、近似)" },
   6: { color: "#e6550d", weight: 2.4, label: "(参考)自転車専用通行帯・ペイントのみ" },
   7: { color: "#636363", weight: 2, dashed: true, label: "(参考)車道混在・矢羽根等" },
@@ -190,7 +190,7 @@ function tierMatchExpression(field, defaultValue) {
 // ["match",tier,["interpolate",zoom,...],...] のようにmatchの中にinterpolateを
 // 複数個ネストするのはNGなので、必ず一番外側をズームのinterpolateにし、
 // 各ズーム段階の値としてtierごとのmatchを埋め込む形にする。
-const WIDTH_ZOOM_STOPS = [8, 1.6, 12, 2.4, 16, 3.6, 20, 5.2];
+const WIDTH_ZOOM_STOPS = [8, 2.2, 12, 3.2, 16, 4.8, 20, 7];
 
 function tierWidthExpression(defaultWeight, multiplier) {
   const m = multiplier || 1;
@@ -574,7 +574,6 @@ document.getElementById("search-to").addEventListener("keydown", (e) => {
 });
 
 document.getElementById("menu-toggle").addEventListener("click", toggleSidebar);
-document.getElementById("sidebar-close").addEventListener("click", closeSidebar);
 
 document.getElementById("btn-set-from").addEventListener("click", () => setPickMode("from"));
 document.getElementById("btn-set-to").addEventListener("click", () => setPickMode("to"));
@@ -683,6 +682,52 @@ function setPoint(kind, lon, lat) {
   }
 }
 
+// 地図上の専用道路・参考レイヤーをタップしたときに、名称・専用度合い・属性・
+// データ出典・OSMへのリンク・Googleストリートビューへのリンクをポップアップ表示する。
+// 「どんな道路か実際に確認したい」という要望への対応(2026-09-21)。
+// Googleストリートビューはリンクのみ(埋め込みAPIはキー・課金が必要なため使わない。
+// リンクなら無料・キー不要でユーザーのブラウザで開ける)。
+const INFO_LAYER_IDS = ["cycleway-line-solid", "cycleway-line-dashed", "reference-line-solid", "reference-line-dashed"];
+
+function formatRoadInfoPopup(props, lngLat) {
+  const tierLabel = (TIER_STYLE[props.tier] || {}).label || "不明";
+  const name = props.name || "(名称不明の区間)";
+  const attrs = [];
+  if (props.surface) attrs.push(`路面: ${props.surface}`);
+  if (props.foot) attrs.push(`歩行者: ${props.foot}`);
+  if (props.segregated) attrs.push(`歩行者との分離: ${props.segregated}`);
+  const attrsHtml = attrs.length ? `<div class="hint">${attrs.join(" / ")}</div>` : "";
+  const osmUrl = `https://www.openstreetmap.org/way/${props.id}`;
+  const svUrl = `https://www.google.com/maps?layer=c&cbll=${lngLat.lat},${lngLat.lng}`;
+  return (
+    `<div style="font-size:0.8rem;max-width:240px;">` +
+    `<div style="font-weight:bold;margin-bottom:2px;">${name}</div>` +
+    `<div>${tierLabel}</div>${attrsHtml}` +
+    `<div style="margin-top:6px;">` +
+    `<a href="${osmUrl}" target="_blank" rel="noopener">OSMで詳細を見る(way ${props.id})</a><br>` +
+    `<a href="${svUrl}" target="_blank" rel="noopener">Googleストリートビューで見る</a>` +
+    `</div>` +
+    `<div class="hint" style="margin-top:4px;">出典: OpenStreetMap contributors(ODbL)、2026-09-20取得</div>` +
+    `</div>`
+  );
+}
+
+function attachRoadInfoPopups() {
+  for (const layerId of INFO_LAYER_IDS) {
+    map.on("click", layerId, (e) => {
+      if (pickMode) return; // 出発地・目的地の指定中はポップアップを出さない
+      const props = e.features[0].properties;
+      new maplibregl.Popup({ maxWidth: "280px" }).setLngLat(e.lngLat).setHTML(formatRoadInfoPopup(props, e.lngLat)).addTo(map);
+    });
+    map.on("mouseenter", layerId, () => {
+      if (!pickMode) map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("mouseleave", layerId, () => {
+      map.getCanvas().style.cursor = "";
+    });
+  }
+}
+
 function attachMapHandlers() {
   map.on("click", (e) => {
     if (!pickMode || !graph) return;
@@ -692,6 +737,18 @@ function attachMapHandlers() {
   });
 
   map.on("load", async () => {
+    // 専用道路・参考レイヤーを先に追加し、検索結果のライン(search-result/
+    // route-result)は必ずその後に追加する(MapLibreは後から追加したレイヤーほど
+    // 上に重なって描画されるため、経路がサイクリングロード等の下に隠れないようにする)。
+    await Promise.all([
+      loadCyclewayNetwork(),
+      loadReferenceInfrastructure(),
+      loadAttribution(),
+      loadRoutesIndex(),
+      loadTileIndex(),
+    ]);
+    attachRoadInfoPopups();
+
     map.addSource("search-result", { type: "geojson", data: EMPTY_FC });
     map.addLayer({
       id: "search-result-line",
@@ -708,14 +765,6 @@ function attachMapHandlers() {
       layout: { "line-cap": "round", "line-join": "round" },
       paint: { "line-color": "#d62728", "line-width": 4 },
     });
-
-    await Promise.all([
-      loadCyclewayNetwork(),
-      loadReferenceInfrastructure(),
-      loadAttribution(),
-      loadRoutesIndex(),
-      loadTileIndex(),
-    ]);
   });
 }
 
