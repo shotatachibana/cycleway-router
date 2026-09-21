@@ -1,0 +1,20 @@
+input:
+  roads_pbf: "data/interim/osm_pbf/kanto_roads_filtered.osm.pbf"
+
+# 関東本土の範囲(src/road_network/の抽出範囲と合わせる)
+bounds:
+  min_lon: 138.2
+  min_lat: 34.5
+  max_lon: 141.2
+  max_lat: 37.3
+
+tile_size_deg: 0.1
+coordinate_precision_digits: 6
+
+# 専用道路ネットワーク側(docs/data/cycleway_network.geojson)で
+# 既にカバーしているので、タイル側では除外する
+exclude_highway: ["cycleway", "track"]
+
+output:
+  tiles_dir: "docs/data/tiles"
+  index_file: "docs/data/tiles/index.json"

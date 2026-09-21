@@ -30,16 +30,21 @@ const TIER_STYLE = {
 };
 
 // 近距離検索は「専用道路(tier1-5)を最優先、繋がらなければ自転車レーン・車道混在
-// (tier6,7)もペナルティ付きで使う」という重み付き探索にする(表示のオン/オフとは独立)。
+// (tier6,7)、それでも繋がらなければ一般道路網タイル(tier8)もペナルティ付きで使う」
+// という重み付き探索にする(表示のオン/オフとは独立)。
 // 値はR5側のカスタムコスト(専用道路の定義、一般道ペナルティ)と同じ考え方。未確定・調整余地あり。
-const ROUTING_PENALTY = { 6: 2.5, 7: 5.0 };
+const ROUTING_PENALTY = { 6: 2.5, 7: 5.0, 8: 8.0 };
 function weightForFeature(feature) {
   return ROUTING_PENALTY[feature.properties.tier] || 1.0;
+}
+const TILE_TIER = 8;
+function tileWeightForFeature() {
+  return ROUTING_PENALTY[TILE_TIER];
 }
 
 const TIER_LABEL_SHORT = {
   1: "専用道路", 2: "専用道路", 3: "専用道路", 4: "専用道路", 5: "専用道路",
-  6: "自転車レーン", 7: "車道混在",
+  6: "自転車レーン", 7: "車道混在", 8: "一般道路",
 };
 
 function tierMatchExpression(field, defaultValue) {
@@ -141,12 +146,49 @@ async function loadReferenceInfrastructure() {
   maybeBuildRoutingGraph();
 }
 
+let baseCyclewayGraph = null;
+let baseReferenceGraph = null;
+const loadedTileGraphs = new Map(); // "col_row" -> graph
+let tileIndex = null; // docs/data/tiles/index.json
+
 function maybeBuildRoutingGraph() {
   if (!cyclewayGeojson || !referenceGeojson) return;
-  const cyclewayGraph = CycleGraph.buildGraph(cyclewayGeojson, weightForFeature);
-  const referenceGraph = CycleGraph.buildGraph(referenceGeojson, weightForFeature);
-  graph = CycleGraph.mergeGraphs([cyclewayGraph, referenceGraph]);
-  console.log(`routing graph: ${graph.nodeCoords.length} nodes`);
+  baseCyclewayGraph = CycleGraph.buildGraph(cyclewayGeojson, weightForFeature);
+  baseReferenceGraph = CycleGraph.buildGraph(referenceGeojson, weightForFeature);
+  rebuildCombinedGraph();
+}
+
+function rebuildCombinedGraph() {
+  graph = CycleGraph.mergeGraphs([baseCyclewayGraph, baseReferenceGraph, ...loadedTileGraphs.values()]);
+  console.log(`routing graph: ${graph.nodeCoords.length} nodes (tiles loaded: ${loadedTileGraphs.size})`);
+}
+
+async function loadTileIndex() {
+  const res = await fetch("data/tiles/index.json");
+  tileIndex = await res.json();
+}
+
+// 専用道路・自転車レーン等が近くに無い場合の最後の手段として、出発地・目的地を
+// 含む一般道路網タイルをその都度読み込む(初期表示は軽いまま、クリックした場所
+// 周辺だけ動的に取得する。CLAUDE.md「設計上の未決事項」1参照)。
+function findTile(lon, lat) {
+  if (!tileIndex) return null;
+  for (const t of tileIndex.tiles) {
+    if (lon >= t.minLon && lon < t.maxLon && lat >= t.minLat && lat < t.maxLat) {
+      return t;
+    }
+  }
+  return null;
+}
+
+async function ensureTileLoaded(tileEntry) {
+  const key = `${tileEntry.col}_${tileEntry.row}`;
+  if (loadedTileGraphs.has(key)) return false;
+  const res = await fetch(`data/tiles/${tileEntry.file}`);
+  const geojson = await res.json();
+  for (const f of geojson.features) f.properties.tier = TILE_TIER;
+  loadedTileGraphs.set(key, CycleGraph.buildGraph(geojson, tileWeightForFeature));
+  return true;
 }
 
 async function loadAttribution() {
@@ -243,13 +285,23 @@ map.on("click", (e) => {
   }
 });
 
-function runNearbySearch() {
+async function runNearbySearch() {
   const resultDiv = document.getElementById("nearby-result");
+  resultDiv.innerHTML = '<span class="hint">周辺の道路データを読み込み中...</span>';
+
+  const fromTile = findTile(fromPoint.lon, fromPoint.lat);
+  const toTile = findTile(toPoint.lon, toPoint.lat);
+  const loads = [];
+  if (fromTile) loads.push(ensureTileLoaded(fromTile));
+  if (toTile) loads.push(ensureTileLoaded(toTile));
+  const loadedAny = (await Promise.all(loads)).some(Boolean);
+  if (loadedAny) rebuildCombinedGraph();
+
   const nearFrom = CycleGraph.nearestNode(graph, fromPoint.lon, fromPoint.lat);
   const nearTo = CycleGraph.nearestNode(graph, toPoint.lon, toPoint.lat);
 
   if (nearFrom.index < 0 || nearTo.index < 0) {
-    resultDiv.innerHTML = '<span class="ng">周辺に専用道路ネットワークが見つかりませんでした。</span>';
+    resultDiv.innerHTML = '<span class="ng">周辺に道路データが見つかりませんでした。</span>';
     return;
   }
 
@@ -257,7 +309,7 @@ function runNearbySearch() {
   if (!result) {
     map.getSource("search-result").setData(EMPTY_FC);
     resultDiv.innerHTML =
-      '<span class="ng">専用道路・自転車レーン等をすべて使っても繋がっていません(分断されています)。長距離ルートの事前計算リストを確認してください。</span>';
+      '<span class="ng">専用道路・自転車レーン・一般道をすべて使っても繋がっていません。長距離ルートの事前計算リストを確認してください。</span>';
     return;
   }
 
@@ -300,5 +352,6 @@ map.on("load", async () => {
     loadReferenceInfrastructure(),
     loadAttribution(),
     loadRoutesIndex(),
+    loadTileIndex(),
   ]);
 });
