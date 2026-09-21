@@ -12,6 +12,37 @@ const KANTO_CENTER = [139.6, 36.0]; // MapLibreは[lon, lat]の順
 // ほぼ見えないため、色を濃く・太さを引き上げている。
 const RAIL_LAYER_IDS = ["road_major_rail", "road_transit_rail", "bridge_major_rail", "bridge_transit_rail"];
 
+// このサイトは自転車専用道路(自作のcycleway/reference/tileレイヤー)が主役であり、
+// 自動車の高速道路・幹線道路を目立たせる必要は無い、という指摘を受けて、
+// road/bridge/tunnelのmotorway・trunk・primary・secondary・tertiary系レイヤーを
+// 縮小・減彩する(ラベルはナビの目安として残す。線の見た目だけを控えめにする)。
+const CAR_ROAD_LAYER_PATTERN = /^(road|bridge|tunnel)_(motorway|trunk_primary|secondary_tertiary)(_link)?(_casing)?$/;
+const CAR_ROAD_WIDTH_FACTOR = 0.45;
+const CAR_ROAD_COLOR = { casing: "#e3ddd2", fill: "#d8cfc0" };
+
+function scaleWidthExpression(expr, factor) {
+  if (!Array.isArray(expr)) return typeof expr === "number" ? expr * factor : expr;
+  if (expr[0] !== "interpolate") return expr;
+  const [op, interp, input, ...stops] = expr;
+  const scaledStops = [];
+  for (let i = 0; i < stops.length; i += 2) {
+    scaledStops.push(stops[i], typeof stops[i + 1] === "number" ? stops[i + 1] * factor : stops[i + 1]);
+  }
+  return [op, interp, input, ...scaledStops];
+}
+
+function mutedCarRoadLayer(l) {
+  const isCasing = l.id.includes("casing");
+  return {
+    ...l,
+    paint: {
+      ...l.paint,
+      "line-color": isCasing ? CAR_ROAD_COLOR.casing : CAR_ROAD_COLOR.fill,
+      "line-width": scaleWidthExpression(l.paint["line-width"], CAR_ROAD_WIDTH_FACTOR),
+    },
+  };
+}
+
 async function loadFlattenedStyle() {
   const res = await fetch("https://tiles.openfreemap.org/styles/liberty");
   const style = await res.json();
@@ -29,6 +60,7 @@ async function loadFlattenedStyle() {
           },
         };
       }
+      if (CAR_ROAD_LAYER_PATTERN.test(l.id)) return mutedCarRoadLayer(l);
       return l;
     });
   return style;
@@ -326,6 +358,16 @@ function setPickMode(mode) {
   pickMode = mode;
   document.getElementById("btn-set-from").classList.toggle("active", mode === "from");
   document.getElementById("btn-set-to").classList.toggle("active", mode === "to");
+  // スマホ画面ではサイドバーが地図に重なるオーバーレイなので、出発地・目的地を
+  // クリックで指定できるよう、指定モードに入ったら自動で閉じる。
+  if (mode) closeSidebar();
+}
+
+function openSidebar() {
+  document.getElementById("sidebar").classList.add("open");
+}
+function closeSidebar() {
+  document.getElementById("sidebar").classList.remove("open");
 }
 
 function makePinElement(kind) {
@@ -361,6 +403,9 @@ function downloadGpx(coords, name, filename) {
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+document.getElementById("menu-toggle").addEventListener("click", openSidebar);
+document.getElementById("sidebar-close").addEventListener("click", closeSidebar);
 
 document.getElementById("btn-set-from").addEventListener("click", () => setPickMode("from"));
 document.getElementById("btn-set-to").addEventListener("click", () => setPickMode("to"));
@@ -453,7 +498,7 @@ function attachMapHandlers() {
     setPickMode(null);
 
     if (fromPoint && toPoint) {
-      runNearbySearch();
+      runNearbySearch().then(openSidebar);
     }
   });
 
