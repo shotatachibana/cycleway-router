@@ -8,12 +8,29 @@ const KANTO_CENTER = [139.6, 36.0]; // MapLibreは[lon, lat]の順
 // Googleマップに近い見やすさを実現しやすい。
 // なお、標準のliberty styleはzoom14以上で建物をfill-extrusion(立体・影付き)で
 // 描画し見にくいとの指摘があったため、そのレイヤーを平面表示に差し替えている。
+// また、鉄道(road_major_rail等)は標準スタイルだと薄い灰色・極細で低いズームでは
+// ほぼ見えないため、色を濃く・太さを引き上げている。
+const RAIL_LAYER_IDS = ["road_major_rail", "road_transit_rail", "bridge_major_rail", "bridge_transit_rail"];
+
 async function loadFlattenedStyle() {
   const res = await fetch("https://tiles.openfreemap.org/styles/liberty");
   const style = await res.json();
   style.layers = style.layers
     .filter((l) => l.id !== "building-3d")
-    .map((l) => (l.id === "building" ? { ...l, maxzoom: 24 } : l));
+    .map((l) => {
+      if (l.id === "building") return { ...l, maxzoom: 24 };
+      if (RAIL_LAYER_IDS.includes(l.id)) {
+        return {
+          ...l,
+          paint: {
+            ...l.paint,
+            "line-color": "#5b5b5b",
+            "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1, 12, 1.5, 16, 2.5, 20, 4],
+          },
+        };
+      }
+      return l;
+    });
   return style;
 }
 
@@ -30,8 +47,9 @@ const TIER_STYLE = {
   3: { color: "#6baed6", weight: 1.8, label: "専用・歩行者共用" },
   4: { color: "#9ecae1", weight: 1.5, label: "専用(詳細不明)" },
   5: { color: "#984ea3", weight: 2.2, dashed: true, label: "分離型自転車道(車道沿い、近似)" },
-  6: { color: "#fdae61", weight: 1.3, label: "(参考)自転車専用通行帯・ペイントのみ" },
-  7: { color: "#bdbdbd", weight: 1, dashed: true, label: "(参考)車道混在・矢羽根等" },
+  6: { color: "#e6550d", weight: 2.4, label: "(参考)自転車専用通行帯・ペイントのみ" },
+  7: { color: "#636363", weight: 2, dashed: true, label: "(参考)車道混在・矢羽根等" },
+  8: { color: "#252525", weight: 2, label: "一般道路(地図上には表示しない)" },
 };
 
 // 近距離検索は「専用道路(tier1-5)を最優先、繋がらなければ自転車レーン・車道混在
@@ -51,6 +69,39 @@ const TIER_LABEL_SHORT = {
   1: "専用道路", 2: "専用道路", 3: "専用道路", 4: "専用道路", 5: "専用道路",
   6: "自転車レーン", 7: "車道混在", 8: "一般道路",
 };
+
+// Googleマップの経路案内のように、通った順番に「専用道路 2.3km→自転車レーン
+// 0.4km→一般道路 1.1km→...」と一覧表示する。タグの継ぎ目のノイズで極端に短い
+// 区間(20m未満)が挟まると見づらいので、直前の区間にまとめる。
+const MIN_SEGMENT_M = 20;
+
+function mergeShortSegments(segments) {
+  const merged = [];
+  for (const seg of segments) {
+    const prev = merged[merged.length - 1];
+    if (prev && seg.distanceM < MIN_SEGMENT_M) {
+      prev.distanceM += seg.distanceM;
+    } else {
+      merged.push({ ...seg });
+    }
+  }
+  return merged;
+}
+
+function renderSegmentList(rawSegments) {
+  const segments = mergeShortSegments(rawSegments);
+  const items = segments
+    .map((seg) => {
+      const style = TIER_STYLE[seg.tier] || {};
+      const dashClass = style.dashed ? "dashed" : "";
+      return (
+        `<li><span class="legend-swatch ${dashClass}" style="background:${style.color || "#999"}"></span>` +
+        `${TIER_LABEL_SHORT[seg.tier] || "不明"} ${(seg.distanceM / 1000).toFixed(2)} km</li>`
+      );
+    })
+    .join("");
+  return `<ol class="segment-list">${items}</ol>`;
+}
 
 function tierMatchExpression(field, defaultValue) {
   const expr = ["match", ["get", "tier"]];
@@ -376,15 +427,13 @@ async function runNearbySearch() {
   gpxBtn.classList.remove("hidden");
   const accessM = Math.round(nearFrom.distanceM + nearTo.distanceM);
 
-  const breakdown = Object.entries(result.tierDistanceM)
-    .sort((a, b) => a[0] - b[0])
-    .map(([tier, m]) => `${TIER_LABEL_SHORT[tier] || "不明"} ${(m / 1000).toFixed(2)}km`)
-    .join(" + ");
   const cappedNote = capped
     ? '<br><span class="hint">(出発地・目的地が離れているため、周辺の一般道データのみを使用しました)</span>'
     : "";
   resultDiv.innerHTML =
-    `<span class="ok">距離: ${(result.distanceM / 1000).toFixed(2)} km(${breakdown})<br>` +
+    `<span class="ok">距離: ${(result.distanceM / 1000).toFixed(2)} km</span>` +
+    renderSegmentList(result.segments) +
+    `<br>` +
     `出発地・目的地から最寄りのネットワークまで、合計約 ${accessM} m の徒歩/一般道アクセスが別途必要です</span>${cappedNote}`;
 }
 

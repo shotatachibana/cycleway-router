@@ -190,16 +190,25 @@ const CycleGraph = (() => {
 
     let distanceM = 0;
     const tierDistanceM = {};
+    // 経路をたどった順番のまま、同じtierが連続する区間をひとまとめにする
+    // (Googleマップの経路案内のように「専用道路を2.3km→一般道を1.1km→...」と
+    // 表示するため。区間の順序が分かるようにする)。
+    const segments = [];
     for (let i = 0; i < path.length - 1; i++) {
       const a = path[i];
       const b = path[i + 1];
       const edge = graph.adjacency[a].find((e) => e.to === b);
-      if (edge) {
-        distanceM += edge.dist;
-        tierDistanceM[edge.tier] = (tierDistanceM[edge.tier] || 0) + edge.dist;
+      if (!edge) continue;
+      distanceM += edge.dist;
+      tierDistanceM[edge.tier] = (tierDistanceM[edge.tier] || 0) + edge.dist;
+      const last = segments[segments.length - 1];
+      if (last && last.tier === edge.tier) {
+        last.distanceM += edge.dist;
+      } else {
+        segments.push({ tier: edge.tier, distanceM: edge.dist });
       }
     }
-    return { path, distanceM, weightedDistanceM: weightDist[endIdx], tierDistanceM };
+    return { path, distanceM, weightedDistanceM: weightDist[endIdx], tierDistanceM, segments };
   }
 
   return { buildGraph, mergeGraphs, nearestNode, shortestPath, haversineMeters };

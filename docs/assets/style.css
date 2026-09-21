@@ -115,6 +115,19 @@ button.active {
   margin-bottom: 8px;
 }
 
+.segment-list {
+  margin: 6px 0;
+  padding-left: 20px;
+  font-size: 0.78rem;
+}
+
+.segment-list li {
+  margin-bottom: 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .legend-row {
   display: flex;
   align-items: center;
