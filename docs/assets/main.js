@@ -152,14 +152,23 @@ const CASING_COLOR = "#1b5e2c";
 const SIGN_FILL_COLOR = "#1f7a3a";
 const ROUTE_RESULT_COLOR = "#1e6bff"; // 近距離検索の経路。緑の専用道路と同化しないよう青にする
 
-// 「高速道路風」の縁取り・路線番号バッジを付けるtier。
+// 「高速道路風」の縁取り・名前バッジを付ける条件。
 // 2026-09-22、ユーザー方針: 自動車と車道を共有する区間は高速道路っぽく見せたくない。
 // tier1〜4は完全に車と分離された専用道路なので対象にする。
 // tier5「分離型自転車道(車道沿い、近似)」は名前の通り車道に近接した近似データで、
 // 実質的に「併用道路」に近い見た目のものが混じるため対象から外す
 // (tier6,7はそもそも別レイヤー(reference)で、元から縁取り・バッジ無しの素朴な線)。
+// さらに、交差点の自転車専用帯標示のような「名前の無い短い断片」もtier1〜4に
+// 分類されることがあり、それらまで高速道路風になってしまうという指摘を受けて、
+// 「名前(name)を持っているか」も条件に加えた。長い名前付きサイクリングロードの
+// 一部の区間だけ名前タグが抜けていると、そこだけ普通の線に見えてしまう可能性は
+// あるが(データ側の問題)、断片を誤って強調するよりはこちらを優先する。
 const HIGHWAY_TIERS = [1, 2, 3, 4];
-const HIGHWAY_TIER_FILTER = ["in", ["get", "tier"], ["literal", HIGHWAY_TIERS]];
+const HIGHWAY_TIER_FILTER = [
+  "all",
+  ["in", ["get", "tier"], ["literal", HIGHWAY_TIERS]],
+  ["has", "name"],
+];
 // tier5は「専用」ではあるが車道沿いの近似データなので、高速道路の緑とは別の
 // 控えめな色(青緑)にして視覚的に区別する。
 const TIER5_PLAIN_COLOR = "#00695c";
@@ -288,22 +297,10 @@ let lastPrecomputedRoute = null; // {coords, name}
 
 const EMPTY_FC = { type: "FeatureCollection", features: [] };
 
-// ---- 高速道路風の路線番号バッジ(NAVITIMEの「E6」「C3」のようなもの) ----
-
-// データにrefが無いので、名称のある路線に出現順で「C1, C2, ...」を振る。
-// 番号を固定したい場合は、データ生成側でproperties.refを持たせればそちらを優先する。
-const refByName = new Map();
-function assignRefs(geojson) {
-  for (const f of geojson.features) {
-    const p = f.properties || (f.properties = {});
-    if (p.ref) continue;
-    const n = p.name;
-    if (!n) continue;
-    if (!refByName.has(n)) refByName.set(n, "C" + (refByName.size + 1));
-    p.ref = refByName.get(n);
-  }
-}
-
+// ---- 高速道路風の名前バッジ(NAVITIMEのE6・C3のような路線番号の代わりに、
+// サイクリングロードの名前そのものを緑バッジで表示する。2026-09-22変更:
+// 以前は名前から自動でC1,C2...という番号を振っていたが、番号は不要という
+// 指摘を受けて廃止し、名前を直接バッジに載せる方式にした)。
 // 角丸の四角を描く(ctx.roundRectが無い古い環境でも動くよう自前で実装)。
 function roundedRectPath(g, x, y, w, h, r) {
   g.beginPath();
@@ -347,7 +344,6 @@ function addSignImage() {
 async function loadCyclewayNetwork() {
   const res = await fetch("data/cycleway_network.geojson");
   cyclewayGeojson = await res.json();
-  assignRefs(cyclewayGeojson);
   map.addSource("cycleway", { type: "geojson", data: cyclewayGeojson });
   map.addLayer({
     id: "cycleway-line-casing",
@@ -387,13 +383,13 @@ async function loadCyclewayNetwork() {
 
   addSignImage();
 
-  // サイクリングロードの名称(例: 「多摩川サイクリングロード」)は経路に沿って表示する。
-  // 白文字+緑の縁取りの文字ラベル。路線番号バッジと役割を分けるため、やや寄ったズームでだけ出す。
+  // tier5(車道沿いの近似データ)の名前は、高速道路風にはせず、素朴な文字ラベルとして残す。
+  // (tier1〜4の名前付き区間は下のバッジレイヤーで表示するので、ここでは除外する)
   map.addLayer({
     id: "cycleway-name-label",
     type: "symbol",
     source: "cycleway",
-    filter: ["has", "name"],
+    filter: ["all", ["has", "name"], ["==", ["get", "tier"], 5]],
     minzoom: 12,
     layout: {
       "symbol-placement": "line",
@@ -404,30 +400,33 @@ async function loadCyclewayNetwork() {
     },
     paint: {
       "text-color": "#ffffff",
-      "text-halo-color": CASING_COLOR,
+      "text-halo-color": TIER5_PLAIN_COLOR,
       "text-halo-width": 3,
     },
   });
 
-  // 路線番号バッジ(緑の角丸+白文字)。路線に沿って一定間隔で繰り返し置く。
-  // 線の向きに回転せず、常に水平に表示する(NAVITIMEの「E6」「C3」と同じ見せ方)。
+  // 高速道路風の名前バッジ(緑の角丸+白文字)。路線番号(C1,C2...)ではなく、
+  // サイクリングロードの名前そのものを表示する(2026-09-22、ユーザー方針)。
+  // HIGHWAY_TIER_FILTERにより、名前の無い短い断片(交差点の自転車専用帯標示等)は
+  // 自動的に除外される。路線に沿って一定間隔で繰り返し置き、線の向きに回転せず
+  // 常に水平に表示する。
   map.addLayer({
-    id: "cycleway-ref-badge",
+    id: "cycleway-name-badge",
     type: "symbol",
     source: "cycleway",
-    filter: ["all", ["has", "ref"], HIGHWAY_TIER_FILTER],
+    filter: HIGHWAY_TIER_FILTER,
     minzoom: 10,
     layout: {
       "symbol-placement": "line",
-      "symbol-spacing": 500,
-      "text-field": ["get", "ref"],
+      "symbol-spacing": 600,
+      "text-field": ["get", "name"],
       "text-size": 12,
       "text-font": ["Noto Sans Bold"],
       "text-rotation-alignment": "viewport",
       "icon-rotation-alignment": "viewport",
       "icon-image": "cycleway-sign",
       "icon-text-fit": "both",
-      "icon-text-fit-padding": [2, 5, 2, 5],
+      "icon-text-fit-padding": [3, 8, 3, 8],
       "text-padding": 2,
     },
     paint: { "text-color": "#ffffff" },
@@ -875,7 +874,6 @@ const INFO_LAYER_IDS = ["cycleway-line-solid", "cycleway-line-dashed", "referenc
 function formatRoadInfoPopup(props, lngLat) {
   const tierLabel = (TIER_STYLE[props.tier] || {}).label || "不明";
   const name = props.name || "(名称不明の区間)";
-  const refText = props.ref ? `[${props.ref}] ` : "";
   const attrs = [];
   if (props.surface) attrs.push(`路面: ${props.surface}`);
   if (props.foot) attrs.push(`歩行者: ${props.foot}`);
@@ -885,7 +883,7 @@ function formatRoadInfoPopup(props, lngLat) {
   const svUrl = `https://www.google.com/maps?layer=c&cbll=${lngLat.lat},${lngLat.lng}`;
   return (
     `<div style="font-size:0.8rem;max-width:240px;">` +
-    `<div style="font-weight:bold;margin-bottom:2px;">${refText}${name}</div>` +
+    `<div style="font-weight:bold;margin-bottom:2px;">${name}</div>` +
     `<div>${tierLabel}</div>${attrsHtml}` +
     `<div style="margin-top:6px;">` +
     `<a href="${osmUrl}" target="_blank" rel="noopener">OSMで詳細を見る(way ${props.id})</a><br>` +
