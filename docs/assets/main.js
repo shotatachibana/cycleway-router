@@ -213,7 +213,7 @@ function tierMatchExpression(field, defaultValue) {
 // ["match",tier,["interpolate",zoom,...],...] のようにmatchの中にinterpolateを
 // 複数個ネストするのはNGなので、必ず一番外側をズームのinterpolateにし、
 // 各ズーム段階の値としてtierごとのmatchを埋め込む形にする。
-const WIDTH_ZOOM_STOPS = [8, 2.6, 12, 4, 16, 6.5, 20, 10];
+const WIDTH_ZOOM_STOPS = [8, 0.8, 11, 1.4, 14, 2.6, 17, 5, 20, 8];
 
 function tierWidthExpression(defaultWeight, multiplier) {
   const m = multiplier || 1;

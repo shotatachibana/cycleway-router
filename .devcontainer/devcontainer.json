@@ -6,7 +6,9 @@
   "remoteUser": "vscode",
 
   "features": {
-    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
+    // Claude Codeはfeatureではなく、Dockerfileでvscodeユーザー権限のネイティブ版として入れる。
+    // (featureはroot権限でnpmグローバルに入れるため、自動アップデートが権限エラーになっていた)
+
     // R5(r5py/r5r)はJDK 21以上を要求する。ここで入れたJDKをr5pyが使う。
     "ghcr.io/devcontainers/features/java:1": {
       "version": "21",
