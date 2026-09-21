@@ -66,12 +66,19 @@ function japaneseOnlyTextField(l) {
   };
 }
 
+// 道路番号(路線番号シールド)は不要という指摘があったため非表示にする
+// (道路名そのもの(highway-name-*)は残す)。
+const ROAD_SHIELD_LAYER_IDS = ["highway-shield-non-us", "highway-shield-us-interstate", "road_shield_us"];
+
 async function loadFlattenedStyle() {
   const res = await fetch("https://tiles.openfreemap.org/styles/liberty");
   const style = await res.json();
   style.layers = style.layers
     .filter((l) => l.id !== "building-3d")
     .map((l) => {
+      if (ROAD_SHIELD_LAYER_IDS.includes(l.id)) {
+        return { ...l, layout: { ...l.layout, visibility: "none" } };
+      }
       if (l.id === "building") return { ...l, maxzoom: 24 };
       if (RAIL_LAYER_IDS.includes(l.id)) {
         const isHatching = l.id.endsWith("_hatching");
@@ -183,7 +190,7 @@ function tierMatchExpression(field, defaultValue) {
 // ["match",tier,["interpolate",zoom,...],...] のようにmatchの中にinterpolateを
 // 複数個ネストするのはNGなので、必ず一番外側をズームのinterpolateにし、
 // 各ズーム段階の値としてtierごとのmatchを埋め込む形にする。
-const WIDTH_ZOOM_STOPS = [8, 1.1, 12, 1.5, 16, 2.4, 20, 3.5];
+const WIDTH_ZOOM_STOPS = [8, 1.6, 12, 2.4, 16, 3.6, 20, 5.2];
 
 function tierWidthExpression(defaultWeight, multiplier) {
   const m = multiplier || 1;
@@ -279,6 +286,26 @@ async function loadCyclewayNetwork() {
       "line-color": TIER_STYLE[5].color,
       "line-width": zoomScaledWidth(TIER_STYLE[5].weight),
       "line-dasharray": [2, 1.5],
+    },
+  });
+  // サイクリングロードの名称(例: 「多摩川サイクリングロード」)が分かっているものは
+  // 経路に沿って表示する(道路番号シールドは非表示にした代わりに、こちらは残す)。
+  map.addLayer({
+    id: "cycleway-name-label",
+    type: "symbol",
+    source: "cycleway",
+    filter: ["has", "name"],
+    layout: {
+      "symbol-placement": "line",
+      "text-field": ["get", "name"],
+      "text-size": 12,
+      "text-font": ["Noto Sans Regular"],
+      "symbol-spacing": 300,
+    },
+    paint: {
+      "text-color": "#08306b",
+      "text-halo-color": "#ffffff",
+      "text-halo-width": 1.5,
     },
   });
   buildLegend();
@@ -415,16 +442,7 @@ async function loadRoutesIndex() {
     const routeRes = await fetch(`data/${select.value}`);
     const routeGeojson = await routeRes.json();
     map.getSource("route-result").setData({ type: "FeatureCollection", features: [routeGeojson] });
-    const coords = routeGeojson.geometry.coordinates;
-    const lons = coords.map((c) => c[0]);
-    const lats = coords.map((c) => c[1]);
-    map.fitBounds(
-      [
-        [Math.min(...lons), Math.min(...lats)],
-        [Math.max(...lons), Math.max(...lats)],
-      ],
-      { padding: 40 }
-    );
+    fitRouteBounds(routeGeojson.geometry.coordinates);
     const p = routeGeojson.properties;
     resultDiv.innerHTML = `<span class="ok">${p.name}: 距離 ${p.length_km} km、専用道路上 ${Math.round(p.cycleway_share * 100)}%</span>`;
     lastPrecomputedRoute = { coords, name: p.name };
@@ -446,6 +464,9 @@ function openSidebar() {
 }
 function closeSidebar() {
   document.getElementById("sidebar").classList.remove("open");
+}
+function toggleSidebar() {
+  document.getElementById("sidebar").classList.toggle("open");
 }
 
 function makePinElement(kind) {
@@ -482,9 +503,11 @@ function downloadGpx(coords, name, filename) {
   URL.revokeObjectURL(url);
 }
 
-// 地名検索: OpenStreetMapの無料ジオコーダーNominatimを使う(APIキー不要、
-// 利用規約上リクエスト頻度を抑える必要があるためユーザー操作(ボタン/Enter)の
-// たびに1回だけ呼ぶ。出典表記は下部の出典欄に記載済み)。
+// 地名検索: OpenStreetMapの無料ジオコーダーNominatimを使う(APIキー不要)。
+// 入力するたびに自動検索するが、Nominatimの利用規約は「1秒に1回まで」
+// 「キー入力のたびに毎回叩くようなオートコンプリートは避ける」ことを求めているため、
+// 入力が止まってから600ms経ってから1回だけ検索する(デバウンス)ことで頻度を抑える。
+// 出典表記は下部の出典欄に記載済み。
 async function searchPlace(query) {
   const url =
     `https://nominatim.openstreetmap.org/search?format=jsonv2&accept-language=ja` +
@@ -517,16 +540,32 @@ function renderSearchResults(kind, results) {
   ul.classList.remove("hidden");
 }
 
+const searchRequestSeq = { from: 0, to: 0 };
+
 async function handleSearch(kind) {
   const input = document.getElementById(`search-${kind}`);
   const query = input.value.trim();
-  if (!query) return;
+  const ul = document.getElementById(`search-${kind}-results`);
+  if (query.length < 2) {
+    ul.classList.add("hidden");
+    return;
+  }
+  const seq = ++searchRequestSeq[kind];
   const results = await searchPlace(query);
+  if (seq !== searchRequestSeq[kind]) return; // 検索中に次の入力があれば結果を捨てる
   renderSearchResults(kind, results);
+}
+
+const searchDebounceTimers = {};
+function scheduleSearch(kind) {
+  clearTimeout(searchDebounceTimers[kind]);
+  searchDebounceTimers[kind] = setTimeout(() => handleSearch(kind), 600);
 }
 
 document.getElementById("btn-search-from").addEventListener("click", () => handleSearch("from"));
 document.getElementById("btn-search-to").addEventListener("click", () => handleSearch("to"));
+document.getElementById("search-from").addEventListener("input", () => scheduleSearch("from"));
+document.getElementById("search-to").addEventListener("input", () => scheduleSearch("to"));
 document.getElementById("search-from").addEventListener("keydown", (e) => {
   if (e.key === "Enter") handleSearch("from");
 });
@@ -534,7 +573,7 @@ document.getElementById("search-to").addEventListener("keydown", (e) => {
   if (e.key === "Enter") handleSearch("to");
 });
 
-document.getElementById("menu-toggle").addEventListener("click", openSidebar);
+document.getElementById("menu-toggle").addEventListener("click", toggleSidebar);
 document.getElementById("sidebar-close").addEventListener("click", closeSidebar);
 
 document.getElementById("btn-set-from").addEventListener("click", () => setPickMode("from"));
@@ -565,6 +604,22 @@ document.getElementById("btn-gpx-route").addEventListener("click", () => {
     downloadGpx(lastPrecomputedRoute.coords, lastPrecomputedRoute.name, `cycleway-route-${lastPrecomputedRoute.name}.gpx`);
   }
 });
+
+// 経路(座標配列)が確実に地図上で見えるよう、その範囲にズーム・パンする。
+// サイドバーは検索結果表示時に開くので、隠れる左側分の余白(padding)を
+// 常に確保しておく(offsetWidthはtransformで隠れていても実サイズを返す)。
+function fitRouteBounds(coords) {
+  const lons = coords.map((c) => c[0]);
+  const lats = coords.map((c) => c[1]);
+  const leftPadding = document.getElementById("sidebar").offsetWidth + 40;
+  map.fitBounds(
+    [
+      [Math.min(...lons), Math.min(...lats)],
+      [Math.max(...lons), Math.max(...lats)],
+    ],
+    { padding: { top: 40, right: 40, bottom: 40, left: leftPadding }, maxZoom: 17 }
+  );
+}
 
 async function runNearbySearch() {
   const resultDiv = document.getElementById("nearby-result");
@@ -598,6 +653,7 @@ async function runNearbySearch() {
     type: "FeatureCollection",
     features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } }],
   });
+  fitRouteBounds(coords);
   lastNearbyRouteCoords = coords;
   gpxBtn.classList.remove("hidden");
   const accessM = Math.round(nearFrom.distanceM + nearTo.distanceM);

@@ -66,6 +66,7 @@ def load_features(path, digits, tier_fn, kind):
                 "foot": tags.get("foot"),
                 "segregated": tags.get("segregated"),
                 "surface": tags.get("surface"),
+                "name": tags.get("name"),
             },
             "geometry": {"type": "LineString", "coordinates": coords},
         })
