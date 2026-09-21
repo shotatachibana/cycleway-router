@@ -178,17 +178,34 @@ function tierMatchExpression(field, defaultValue) {
 // 自転車専用道路が主役のサイトなので、高速道路のように「ズームするほど太く
 // 目立つ」表現にする。低ズームでも背景の鉄道(最大2.5px程度)より確実に太くなる
 // よう下限を設定している。
-function zoomScaledWidth(baseWeight) {
-  return ["interpolate", ["linear"], ["zoom"], 8, baseWeight * 1.1, 12, baseWeight * 1.5, 16, baseWeight * 2.4, 20, baseWeight * 3.5];
-}
+// 注意: MapLibreは1つの式の中でzoom("interpolate"/"step")を複数箇所・入れ子で
+// 使えない("Only one zoom-based...subexpression"エラー)。
+// ["match",tier,["interpolate",zoom,...],...] のようにmatchの中にinterpolateを
+// 複数個ネストするのはNGなので、必ず一番外側をズームのinterpolateにし、
+// 各ズーム段階の値としてtierごとのmatchを埋め込む形にする。
+const WIDTH_ZOOM_STOPS = [8, 1.1, 12, 1.5, 16, 2.4, 20, 3.5];
 
 function tierWidthExpression(defaultWeight, multiplier) {
   const m = multiplier || 1;
-  const expr = ["match", ["get", "tier"]];
-  for (const [tier, s] of Object.entries(TIER_STYLE)) {
-    expr.push(Number(tier), zoomScaledWidth((s.weight !== undefined ? s.weight : defaultWeight) * m));
+  const expr = ["interpolate", ["linear"], ["zoom"]];
+  for (let i = 0; i < WIDTH_ZOOM_STOPS.length; i += 2) {
+    const zoom = WIDTH_ZOOM_STOPS[i];
+    const factor = WIDTH_ZOOM_STOPS[i + 1];
+    const matchExpr = ["match", ["get", "tier"]];
+    for (const [tier, s] of Object.entries(TIER_STYLE)) {
+      matchExpr.push(Number(tier), (s.weight !== undefined ? s.weight : defaultWeight) * m * factor);
+    }
+    matchExpr.push(defaultWeight * m * factor);
+    expr.push(zoom, matchExpr);
   }
-  expr.push(zoomScaledWidth(defaultWeight * m));
+  return expr;
+}
+
+function zoomScaledWidth(baseWeight) {
+  const expr = ["interpolate", ["linear"], ["zoom"]];
+  for (let i = 0; i < WIDTH_ZOOM_STOPS.length; i += 2) {
+    expr.push(WIDTH_ZOOM_STOPS[i], baseWeight * WIDTH_ZOOM_STOPS[i + 1]);
+  }
   return expr;
 }
 

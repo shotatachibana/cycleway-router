@@ -42,6 +42,15 @@
   →経路検索の一連の流れ・デスクトップでのサイドバー初期状態を確認。
   コンソールエラーなし
 - ユーザー許可のもとpush済み
+- **push後に発覚した重大なバグ**: 公開直後に確認したところ、
+  `cycleway-line-solid`・`cycleway-line-casing`レイヤーの追加自体が失敗し、
+  専用道路網が地図に全く表示されていないことが判明(コンソールエラー:
+  "Only one zoom-based...subexpression may be used"）。原因は
+  `["match",["get","tier"],1,["interpolate",zoom,...],2,["interpolate",zoom,...],...]`
+  のように、matchの各分岐にズームのinterpolateをネストしていたこと
+  (MapLibreは1つの式内でzoom系のinterpolate/stepを複数箇所・入れ子にできない)。
+  `tierWidthExpression`を「一番外側をズームのinterpolateにし、各ズーム段階の
+  値としてtierごとのmatchを埋め込む」正しい構造に書き直して修正し、再push した
 
 ### 2026-09-21 04:00
 
