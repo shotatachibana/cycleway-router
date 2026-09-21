@@ -47,13 +47,20 @@ function scaleWidthExpression(expr, factor) {
   return [op, interp, input, ...scaledStops];
 }
 
+// 自動車道の「高速道路っぽさ」は色よりも、白い縁取り+濃い本線という
+// 二重線構造そのものが原因なので、縁取り(casing)は描画を消し、本線だけの
+// 単線にする(自転車道の二重線=高速道路風は維持したまま、自動車道だけ普通の
+// 道路に見えるようにする、2026-09-22)。
 function mutedCarRoadLayer(l) {
   const isCasing = l.id.includes("casing");
+  if (isCasing) {
+    return { ...l, layout: { ...l.layout, visibility: "none" } };
+  }
   return {
     ...l,
     paint: {
       ...l.paint,
-      "line-color": isCasing ? CAR_ROAD_COLOR.casing : CAR_ROAD_COLOR.fill,
+      "line-color": CAR_ROAD_COLOR.fill,
       "line-width": scaleWidthExpression(l.paint["line-width"], CAR_ROAD_WIDTH_FACTOR),
     },
   };
@@ -134,7 +141,7 @@ const TIER_STYLE = {
   2: { color: "#3f9d4b", weight: 2.6, label: "専用・歩行者と分離" },
   3: { color: "#4fae5a", weight: 2.2, label: "専用・歩行者共用" },
   4: { color: "#6cc077", weight: 1.9, label: "専用(詳細不明)" },
-  5: { color: "#3f9d4b", weight: 2.4, dashed: true, label: "分離型自転車道(車道沿い、近似)" },
+  5: { color: "#00695c", weight: 2.4, dashed: true, label: "分離型自転車道(車道沿い、近似)" },
   6: { color: "#e6550d", weight: 2.4, label: "(参考)自転車専用通行帯・ペイントのみ" },
   7: { color: "#636363", weight: 2, dashed: true, label: "(参考)車道混在・矢羽根等" },
   8: { color: "#252525", weight: 2, label: "一般道路(地図上には表示しない)" },
@@ -144,6 +151,18 @@ const TIER_STYLE = {
 const CASING_COLOR = "#1b5e2c";
 const SIGN_FILL_COLOR = "#1f7a3a";
 const ROUTE_RESULT_COLOR = "#1e6bff"; // 近距離検索の経路。緑の専用道路と同化しないよう青にする
+
+// 「高速道路風」の縁取り・路線番号バッジを付けるtier。
+// 2026-09-22、ユーザー方針: 自動車と車道を共有する区間は高速道路っぽく見せたくない。
+// tier1〜4は完全に車と分離された専用道路なので対象にする。
+// tier5「分離型自転車道(車道沿い、近似)」は名前の通り車道に近接した近似データで、
+// 実質的に「併用道路」に近い見た目のものが混じるため対象から外す
+// (tier6,7はそもそも別レイヤー(reference)で、元から縁取り・バッジ無しの素朴な線)。
+const HIGHWAY_TIERS = [1, 2, 3, 4];
+const HIGHWAY_TIER_FILTER = ["in", ["get", "tier"], ["literal", HIGHWAY_TIERS]];
+// tier5は「専用」ではあるが車道沿いの近似データなので、高速道路の緑とは別の
+// 控えめな色(青緑)にして視覚的に区別する。
+const TIER5_PLAIN_COLOR = "#00695c";
 
 // 近距離検索は「専用道路(tier1-5)を最優先、繋がらなければ自転車レーン・車道混在
 // (tier6,7)、それでも繋がらなければ一般道路網タイル(tier8)もペナルティ付きで使う」
@@ -334,6 +353,7 @@ async function loadCyclewayNetwork() {
     id: "cycleway-line-casing",
     type: "line",
     source: "cycleway",
+    filter: HIGHWAY_TIER_FILTER,
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
       "line-color": CASING_COLOR,
@@ -359,7 +379,7 @@ async function loadCyclewayNetwork() {
     filter: ["==", ["get", "tier"], 5],
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
-      "line-color": TIER_STYLE[5].color,
+      "line-color": TIER5_PLAIN_COLOR,
       "line-width": zoomScaledWidth(TIER_STYLE[5].weight),
       "line-dasharray": [2, 1.5],
     },
@@ -395,7 +415,7 @@ async function loadCyclewayNetwork() {
     id: "cycleway-ref-badge",
     type: "symbol",
     source: "cycleway",
-    filter: ["has", "ref"],
+    filter: ["all", ["has", "ref"], HIGHWAY_TIER_FILTER],
     minzoom: 10,
     layout: {
       "symbol-placement": "line",
