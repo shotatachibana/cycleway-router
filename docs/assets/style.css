@@ -103,6 +103,10 @@ button.active {
 .pin-from { background: #2a7a2a; }
 .pin-to { background: #b33; }
 
+.hidden {
+  display: none !important;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;

@@ -6,13 +6,18 @@ const KANTO_CENTER = [139.6, 36.0]; // MapLibreは[lon, lat]の順
 // 確認済み。OpenFreeMapは登録・キー・レート制限が無いことを利用規約で確認した。
 // 属性(道路・鉄道の太さ・色)を自分でカスタマイズできるベクトルタイルなので、
 // Googleマップに近い見やすさを実現しやすい。
-const map = new maplibregl.Map({
-  container: "map",
-  style: "https://tiles.openfreemap.org/styles/liberty",
-  center: KANTO_CENTER,
-  zoom: 9,
-});
-map.addControl(new maplibregl.NavigationControl(), "top-left");
+// なお、標準のliberty styleはzoom14以上で建物をfill-extrusion(立体・影付き)で
+// 描画し見にくいとの指摘があったため、そのレイヤーを平面表示に差し替えている。
+async function loadFlattenedStyle() {
+  const res = await fetch("https://tiles.openfreemap.org/styles/liberty");
+  const style = await res.json();
+  style.layers = style.layers
+    .filter((l) => l.id !== "building-3d")
+    .map((l) => (l.id === "building" ? { ...l, maxzoom: 24 } : l));
+  return style;
+}
+
+let map;
 
 // 専用度合い(tier)ごとのスタイル。値が小さいほど「より専用」。
 // 東京都の自転車関連情報マップ(wagmap)の分類(自転車道/自転車歩行者道の分離方法/
@@ -81,6 +86,8 @@ let toPoint = null;
 let pickMode = null; // 'from' | 'to' | null
 let cyclewayGeojson = null;
 let referenceGeojson = null;
+let lastNearbyRouteCoords = null;
+let lastPrecomputedRoute = null; // {coords, name}
 
 const EMPTY_FC = { type: "FeatureCollection", features: [] };
 
@@ -168,9 +175,9 @@ async function loadTileIndex() {
   tileIndex = await res.json();
 }
 
-// 専用道路・自転車レーン等が近くに無い場合の最後の手段として、出発地・目的地を
-// 含む一般道路網タイルをその都度読み込む(初期表示は軽いまま、クリックした場所
-// 周辺だけ動的に取得する。CLAUDE.md「設計上の未決事項」1参照)。
+// 専用道路・自転車レーン等が近くに無い場合の最後の手段として、出発地・目的地の
+// 間の範囲に含まれる一般道路網タイルをその都度読み込む(初期表示は軽いまま、
+// 検索するたびに必要な範囲だけ動的に取得する。CLAUDE.md「設計上の未決事項」1参照)。
 function findTile(lon, lat) {
   if (!tileIndex) return null;
   for (const t of tileIndex.tiles) {
@@ -179,6 +186,30 @@ function findTile(lon, lat) {
     }
   }
   return null;
+}
+
+// 出発地・目的地を含むバウンディングボックス(マージン込み)に交差するタイルを
+// すべて返す。1回の検索で読み込むデータ量が大きくなりすぎないよう、
+// 合計サイズに上限(MAX_TOTAL_BYTES)を設ける。上限を超える場合は出発地・目的地
+// それぞれの最寄りタイルだけに絞る(近距離検索の対象範囲として妥当なサイズに収める)。
+const MAX_TOTAL_BYTES = 80_000_000; // 約80MB。GitHub PagesのCDN配信を想定
+const MARGIN_DEG = 0.03;
+
+function tilesForSearch(lon1, lat1, lon2, lat2) {
+  if (!tileIndex) return { tiles: [], capped: false };
+  const minLon = Math.min(lon1, lon2) - MARGIN_DEG;
+  const maxLon = Math.max(lon1, lon2) + MARGIN_DEG;
+  const minLat = Math.min(lat1, lat2) - MARGIN_DEG;
+  const maxLat = Math.max(lat1, lat2) + MARGIN_DEG;
+  const inBbox = tileIndex.tiles.filter(
+    (t) => t.minLon < maxLon && t.maxLon > minLon && t.minLat < maxLat && t.maxLat > minLat
+  );
+  const totalBytes = inBbox.reduce((sum, t) => sum + t.sizeBytes, 0);
+  if (totalBytes <= MAX_TOTAL_BYTES) {
+    return { tiles: inBbox, capped: false };
+  }
+  const fallback = [findTile(lon1, lat1), findTile(lon2, lat2)].filter(Boolean);
+  return { tiles: fallback, capped: true };
 }
 
 async function ensureTileLoaded(tileEntry) {
@@ -212,9 +243,12 @@ async function loadRoutesIndex() {
   }
   select.addEventListener("change", async () => {
     const resultDiv = document.getElementById("route-result");
+    const gpxBtn = document.getElementById("btn-gpx-route");
     if (!select.value) {
       map.getSource("route-result").setData(EMPTY_FC);
       resultDiv.textContent = "";
+      gpxBtn.classList.add("hidden");
+      lastPrecomputedRoute = null;
       return;
     }
     const routeRes = await fetch(`data/${select.value}`);
@@ -232,6 +266,8 @@ async function loadRoutesIndex() {
     );
     const p = routeGeojson.properties;
     resultDiv.innerHTML = `<span class="ok">${p.name}: 距離 ${p.length_km} km、専用道路上 ${Math.round(p.cycleway_share * 100)}%</span>`;
+    lastPrecomputedRoute = { coords, name: p.name };
+    gpxBtn.classList.remove("hidden");
   });
 }
 
@@ -248,6 +284,33 @@ function makePinElement(kind) {
   return el;
 }
 
+// GPX(GPS Exchange Format)は多くのサイコン(Garmin等)がコース/ルートとして
+// 取り込める共通フォーマット。サーバー無しでブラウザ内だけで生成してダウンロードする。
+function buildGpx(coords, name) {
+  const points = coords.map(([lon, lat]) => `      <trkpt lat="${lat}" lon="${lon}"></trkpt>`).join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="cycleway-router" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>${name}</name>
+    <trkseg>
+${points}
+    </trkseg>
+  </trk>
+</gpx>`;
+}
+
+function downloadGpx(coords, name, filename) {
+  const blob = new Blob([buildGpx(coords, name)], { type: "application/gpx+xml" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 document.getElementById("btn-set-from").addEventListener("click", () => setPickMode("from"));
 document.getElementById("btn-set-to").addEventListener("click", () => setPickMode("to"));
 document.getElementById("btn-clear").addEventListener("click", () => {
@@ -256,8 +319,10 @@ document.getElementById("btn-clear").addEventListener("click", () => {
   fromPoint = null;
   toPoint = null;
   pickMode = null;
+  lastNearbyRouteCoords = null;
   map.getSource("search-result").setData(EMPTY_FC);
   document.getElementById("nearby-result").textContent = "";
+  document.getElementById("btn-gpx-nearby").classList.add("hidden");
 });
 
 document.getElementById("toggle-reference").addEventListener("change", (e) => {
@@ -266,35 +331,23 @@ document.getElementById("toggle-reference").addEventListener("change", (e) => {
   map.setLayoutProperty("reference-line-dashed", "visibility", visibility);
 });
 
-map.on("click", (e) => {
-  if (!pickMode || !graph) return;
-  const { lat, lng } = e.lngLat;
-  const marker = new maplibregl.Marker({ element: makePinElement(pickMode) }).setLngLat([lng, lat]).addTo(map);
-
-  if (pickMode === "from") {
-    if (fromPoint && fromPoint.marker) fromPoint.marker.remove();
-    fromPoint = { lon: lng, lat, marker };
-  } else {
-    if (toPoint && toPoint.marker) toPoint.marker.remove();
-    toPoint = { lon: lng, lat, marker };
-  }
-  setPickMode(null);
-
-  if (fromPoint && toPoint) {
-    runNearbySearch();
+document.getElementById("btn-gpx-nearby").addEventListener("click", () => {
+  if (lastNearbyRouteCoords) downloadGpx(lastNearbyRouteCoords, "近距離検索ルート", "cycleway-route-nearby.gpx");
+});
+document.getElementById("btn-gpx-route").addEventListener("click", () => {
+  if (lastPrecomputedRoute) {
+    downloadGpx(lastPrecomputedRoute.coords, lastPrecomputedRoute.name, `cycleway-route-${lastPrecomputedRoute.name}.gpx`);
   }
 });
 
 async function runNearbySearch() {
   const resultDiv = document.getElementById("nearby-result");
+  const gpxBtn = document.getElementById("btn-gpx-nearby");
+  gpxBtn.classList.add("hidden");
   resultDiv.innerHTML = '<span class="hint">周辺の道路データを読み込み中...</span>';
 
-  const fromTile = findTile(fromPoint.lon, fromPoint.lat);
-  const toTile = findTile(toPoint.lon, toPoint.lat);
-  const loads = [];
-  if (fromTile) loads.push(ensureTileLoaded(fromTile));
-  if (toTile) loads.push(ensureTileLoaded(toTile));
-  const loadedAny = (await Promise.all(loads)).some(Boolean);
+  const { tiles, capped } = tilesForSearch(fromPoint.lon, fromPoint.lat, toPoint.lon, toPoint.lat);
+  const loadedAny = (await Promise.all(tiles.map(ensureTileLoaded))).some(Boolean);
   if (loadedAny) rebuildCombinedGraph();
 
   const nearFrom = CycleGraph.nearestNode(graph, fromPoint.lon, fromPoint.lat);
@@ -308,6 +361,7 @@ async function runNearbySearch() {
   const result = CycleGraph.shortestPath(graph, nearFrom.index, nearTo.index);
   if (!result) {
     map.getSource("search-result").setData(EMPTY_FC);
+    lastNearbyRouteCoords = null;
     resultDiv.innerHTML =
       '<span class="ng">専用道路・自転車レーン・一般道をすべて使っても繋がっていません。長距離ルートの事前計算リストを確認してください。</span>';
     return;
@@ -318,40 +372,80 @@ async function runNearbySearch() {
     type: "FeatureCollection",
     features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } }],
   });
+  lastNearbyRouteCoords = coords;
+  gpxBtn.classList.remove("hidden");
   const accessM = Math.round(nearFrom.distanceM + nearTo.distanceM);
 
   const breakdown = Object.entries(result.tierDistanceM)
     .sort((a, b) => a[0] - b[0])
     .map(([tier, m]) => `${TIER_LABEL_SHORT[tier] || "不明"} ${(m / 1000).toFixed(2)}km`)
     .join(" + ");
+  const cappedNote = capped
+    ? '<br><span class="hint">(出発地・目的地が離れているため、周辺の一般道データのみを使用しました)</span>'
+    : "";
   resultDiv.innerHTML =
     `<span class="ok">距離: ${(result.distanceM / 1000).toFixed(2)} km(${breakdown})<br>` +
-    `出発地・目的地から最寄りのネットワークまで、合計約 ${accessM} m の徒歩/一般道アクセスが別途必要です</span>`;
+    `出発地・目的地から最寄りのネットワークまで、合計約 ${accessM} m の徒歩/一般道アクセスが別途必要です</span>${cappedNote}`;
 }
 
-map.on("load", async () => {
-  map.addSource("search-result", { type: "geojson", data: EMPTY_FC });
-  map.addLayer({
-    id: "search-result-line",
-    type: "line",
-    source: "search-result",
-    layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": "#2ca02c", "line-width": 4 },
-  });
-  map.addSource("route-result", { type: "geojson", data: EMPTY_FC });
-  map.addLayer({
-    id: "route-result-line",
-    type: "line",
-    source: "route-result",
-    layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": "#d62728", "line-width": 4 },
+function attachMapHandlers() {
+  map.on("click", (e) => {
+    if (!pickMode || !graph) return;
+    const { lat, lng } = e.lngLat;
+    const marker = new maplibregl.Marker({ element: makePinElement(pickMode) }).setLngLat([lng, lat]).addTo(map);
+
+    if (pickMode === "from") {
+      if (fromPoint && fromPoint.marker) fromPoint.marker.remove();
+      fromPoint = { lon: lng, lat, marker };
+    } else {
+      if (toPoint && toPoint.marker) toPoint.marker.remove();
+      toPoint = { lon: lng, lat, marker };
+    }
+    setPickMode(null);
+
+    if (fromPoint && toPoint) {
+      runNearbySearch();
+    }
   });
 
-  await Promise.all([
-    loadCyclewayNetwork(),
-    loadReferenceInfrastructure(),
-    loadAttribution(),
-    loadRoutesIndex(),
-    loadTileIndex(),
-  ]);
-});
+  map.on("load", async () => {
+    map.addSource("search-result", { type: "geojson", data: EMPTY_FC });
+    map.addLayer({
+      id: "search-result-line",
+      type: "line",
+      source: "search-result",
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-color": "#2ca02c", "line-width": 4 },
+    });
+    map.addSource("route-result", { type: "geojson", data: EMPTY_FC });
+    map.addLayer({
+      id: "route-result-line",
+      type: "line",
+      source: "route-result",
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-color": "#d62728", "line-width": 4 },
+    });
+
+    await Promise.all([
+      loadCyclewayNetwork(),
+      loadReferenceInfrastructure(),
+      loadAttribution(),
+      loadRoutesIndex(),
+      loadTileIndex(),
+    ]);
+  });
+}
+
+async function initMap() {
+  const style = await loadFlattenedStyle();
+  map = new maplibregl.Map({
+    container: "map",
+    style,
+    center: KANTO_CENTER,
+    zoom: 9,
+  });
+  map.addControl(new maplibregl.NavigationControl(), "top-left");
+  attachMapHandlers();
+}
+
+initMap();
