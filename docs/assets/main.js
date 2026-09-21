@@ -8,12 +8,20 @@ const KANTO_CENTER = [139.6, 36.0]; // MapLibreは[lon, lat]の順
 // Googleマップに近い見やすさを実現しやすい。
 // なお、標準のliberty styleはzoom14以上で建物をfill-extrusion(立体・影付き)で
 // 描画し見にくいとの指摘があったため、そのレイヤーを平面表示に差し替えている。
-// また、鉄道(road_major_rail等)は標準スタイルだと薄い灰色・極細で低いズームでは
-// ほぼ見えないため、色を濃く・太さを引き上げている。
-const RAIL_LAYER_IDS = ["road_major_rail", "road_transit_rail", "bridge_major_rail", "bridge_transit_rail"];
+// また、鉄道は標準スタイルだと薄い灰色・極細で低いズームではほぼ見えないため、
+// 色を濃く・太さを引き上げている(ただし自転車専用道路より目立たせないよう、
+// CYCLEWAY_MAX_WIDTHより細い範囲に収める。トンネル区間(地下鉄)・ハッチング
+// 装飾を含む全パターンを対象にする)。
+const RAIL_LAYER_IDS = [
+  "road_major_rail", "road_transit_rail", "bridge_major_rail", "bridge_transit_rail",
+  "tunnel_major_rail", "tunnel_transit_rail",
+  "road_major_rail_hatching", "road_transit_rail_hatching",
+  "bridge_major_rail_hatching", "bridge_transit_rail_hatching",
+  "tunnel_major_rail_hatching", "tunnel_transit_rail_hatching",
+];
 
 // このサイトは自転車専用道路(自作のcycleway/reference/tileレイヤー)が主役であり、
-// 自動車の高速道路・幹線道路を目立たせる必要は無い、という指摘を受けて、
+// 自動車の高速道路・幹線道路や鉄道を目立たせる必要は無い、という指摘を受けて、
 // road/bridge/tunnelのmotorway・trunk・primary・secondary・tertiary系レイヤーを
 // 縮小・減彩する(ラベルはナビの目安として残す。線の見た目だけを控えめにする)。
 const CAR_ROAD_LAYER_PATTERN = /^(road|bridge|tunnel)_(motorway|trunk_primary|secondary_tertiary)(_link)?(_casing)?$/;
@@ -43,6 +51,21 @@ function mutedCarRoadLayer(l) {
   };
 }
 
+// 地名ラベル(都市名・POI・鉄道駅等)は「name:latin」(英語等)+「name:nonlatin」
+// (現地語=主に日本語)を併記する式になっているものが大半。英語表記が不要という
+// 指摘を受け、nonlatin(日本語)だけを表示する式に一括で差し替える。
+function japaneseOnlyTextField(l) {
+  const tf = l.layout && l.layout["text-field"];
+  if (!tf || JSON.stringify(tf).indexOf("name:latin") === -1) return l;
+  return {
+    ...l,
+    layout: {
+      ...l.layout,
+      "text-field": ["coalesce", ["get", "name:nonlatin"], ["get", "name"]],
+    },
+  };
+}
+
 async function loadFlattenedStyle() {
   const res = await fetch("https://tiles.openfreemap.org/styles/liberty");
   const style = await res.json();
@@ -51,17 +74,25 @@ async function loadFlattenedStyle() {
     .map((l) => {
       if (l.id === "building") return { ...l, maxzoom: 24 };
       if (RAIL_LAYER_IDS.includes(l.id)) {
+        const isHatching = l.id.endsWith("_hatching");
         return {
           ...l,
           paint: {
             ...l.paint,
-            "line-color": "#5b5b5b",
-            "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1, 12, 1.5, 16, 2.5, 20, 4],
+            "line-color": "#4a4a4a",
+            "line-width": isHatching
+              ? scaleWidthExpression(l.paint["line-width"], 0.7)
+              : ["interpolate", ["linear"], ["zoom"], 8, 0.8, 12, 1.2, 16, 1.8, 20, 2.5],
           },
         };
       }
+      if (l.id === "poi_transit") {
+        // 駅アイコン・駅名も少し強調する(ただし自転車道より控えめに)。
+        const jL = japaneseOnlyTextField(l);
+        return { ...jL, layout: { ...jL.layout, "icon-size": 0.9, "text-size": 13 } };
+      }
       if (CAR_ROAD_LAYER_PATTERN.test(l.id)) return mutedCarRoadLayer(l);
-      return l;
+      return japaneseOnlyTextField(l);
     });
   return style;
 }
@@ -144,6 +175,23 @@ function tierMatchExpression(field, defaultValue) {
   return expr;
 }
 
+// 自転車専用道路が主役のサイトなので、高速道路のように「ズームするほど太く
+// 目立つ」表現にする。低ズームでも背景の鉄道(最大2.5px程度)より確実に太くなる
+// よう下限を設定している。
+function zoomScaledWidth(baseWeight) {
+  return ["interpolate", ["linear"], ["zoom"], 8, baseWeight * 1.1, 12, baseWeight * 1.5, 16, baseWeight * 2.4, 20, baseWeight * 3.5];
+}
+
+function tierWidthExpression(defaultWeight, multiplier) {
+  const m = multiplier || 1;
+  const expr = ["match", ["get", "tier"]];
+  for (const [tier, s] of Object.entries(TIER_STYLE)) {
+    expr.push(Number(tier), zoomScaledWidth((s.weight !== undefined ? s.weight : defaultWeight) * m));
+  }
+  expr.push(zoomScaledWidth(defaultWeight * m));
+  return expr;
+}
+
 function buildLegend() {
   const el = document.getElementById("legend");
   el.innerHTML = "";
@@ -176,10 +224,23 @@ const EMPTY_FC = { type: "FeatureCollection", features: [] };
 
 // MapLibreのline-dasharrayはデータ駆動の式(match/case)に対応していないため
 // (定数配列しか指定できない)、破線が必要なtierは別レイヤーに分ける。
+// 高速道路のような縁取り(casing、薄い色で少し太いラインを下に敷く)を追加して、
+// 自転車専用道路が地図上で一番目立つように強調する。
 async function loadCyclewayNetwork() {
   const res = await fetch("data/cycleway_network.geojson");
   cyclewayGeojson = await res.json();
   map.addSource("cycleway", { type: "geojson", data: cyclewayGeojson });
+  map.addLayer({
+    id: "cycleway-line-casing",
+    type: "line",
+    source: "cycleway",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": "#ffffff",
+      "line-width": tierWidthExpression(1.5, 1.8),
+      "line-opacity": 0.9,
+    },
+  });
   map.addLayer({
     id: "cycleway-line-solid",
     type: "line",
@@ -188,7 +249,7 @@ async function loadCyclewayNetwork() {
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
       "line-color": tierMatchExpression("color", "#1f77b4"),
-      "line-width": tierMatchExpression("weight", 1.5),
+      "line-width": tierWidthExpression(1.5),
     },
   });
   map.addLayer({
@@ -199,7 +260,7 @@ async function loadCyclewayNetwork() {
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
       "line-color": TIER_STYLE[5].color,
-      "line-width": TIER_STYLE[5].weight,
+      "line-width": zoomScaledWidth(TIER_STYLE[5].weight),
       "line-dasharray": [2, 1.5],
     },
   });
@@ -404,6 +465,58 @@ function downloadGpx(coords, name, filename) {
   URL.revokeObjectURL(url);
 }
 
+// 地名検索: OpenStreetMapの無料ジオコーダーNominatimを使う(APIキー不要、
+// 利用規約上リクエスト頻度を抑える必要があるためユーザー操作(ボタン/Enter)の
+// たびに1回だけ呼ぶ。出典表記は下部の出典欄に記載済み)。
+async function searchPlace(query) {
+  const url =
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&accept-language=ja` +
+    `&countrycodes=jp&limit=5&q=${encodeURIComponent(query)}`;
+  const res = await fetch(url);
+  return res.json();
+}
+
+function renderSearchResults(kind, results) {
+  const ul = document.getElementById(`search-${kind}-results`);
+  ul.innerHTML = "";
+  if (!results.length) {
+    ul.innerHTML = '<li class="hint">見つかりませんでした</li>';
+    ul.classList.remove("hidden");
+    return;
+  }
+  for (const r of results) {
+    const li = document.createElement("li");
+    li.textContent = r.display_name;
+    li.addEventListener("click", () => {
+      const lon = parseFloat(r.lon);
+      const lat = parseFloat(r.lat);
+      setPoint(kind, lon, lat);
+      ul.classList.add("hidden");
+      document.getElementById(`search-${kind}`).value = r.display_name.split("、")[0].split(",")[0];
+      map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 14) });
+    });
+    ul.appendChild(li);
+  }
+  ul.classList.remove("hidden");
+}
+
+async function handleSearch(kind) {
+  const input = document.getElementById(`search-${kind}`);
+  const query = input.value.trim();
+  if (!query) return;
+  const results = await searchPlace(query);
+  renderSearchResults(kind, results);
+}
+
+document.getElementById("btn-search-from").addEventListener("click", () => handleSearch("from"));
+document.getElementById("btn-search-to").addEventListener("click", () => handleSearch("to"));
+document.getElementById("search-from").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") handleSearch("from");
+});
+document.getElementById("search-to").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") handleSearch("to");
+});
+
 document.getElementById("menu-toggle").addEventListener("click", openSidebar);
 document.getElementById("sidebar-close").addEventListener("click", closeSidebar);
 
@@ -482,24 +595,27 @@ async function runNearbySearch() {
     `出発地・目的地から最寄りのネットワークまで、合計約 ${accessM} m の徒歩/一般道アクセスが別途必要です</span>${cappedNote}`;
 }
 
+// 出発地・目的地の座標をセットする共通処理(地図クリック・地名検索の両方から呼ぶ)。
+function setPoint(kind, lon, lat) {
+  const marker = new maplibregl.Marker({ element: makePinElement(kind) }).setLngLat([lon, lat]).addTo(map);
+  if (kind === "from") {
+    if (fromPoint && fromPoint.marker) fromPoint.marker.remove();
+    fromPoint = { lon, lat, marker };
+  } else {
+    if (toPoint && toPoint.marker) toPoint.marker.remove();
+    toPoint = { lon, lat, marker };
+  }
+  if (fromPoint && toPoint) {
+    runNearbySearch().then(openSidebar);
+  }
+}
+
 function attachMapHandlers() {
   map.on("click", (e) => {
     if (!pickMode || !graph) return;
-    const { lat, lng } = e.lngLat;
-    const marker = new maplibregl.Marker({ element: makePinElement(pickMode) }).setLngLat([lng, lat]).addTo(map);
-
-    if (pickMode === "from") {
-      if (fromPoint && fromPoint.marker) fromPoint.marker.remove();
-      fromPoint = { lon: lng, lat, marker };
-    } else {
-      if (toPoint && toPoint.marker) toPoint.marker.remove();
-      toPoint = { lon: lng, lat, marker };
-    }
+    const kind = pickMode;
     setPickMode(null);
-
-    if (fromPoint && toPoint) {
-      runNearbySearch().then(openSidebar);
-    }
+    setPoint(kind, e.lngLat.lng, e.lngLat.lat);
   });
 
   map.on("load", async () => {
@@ -538,8 +654,11 @@ async function initMap() {
     center: KANTO_CENTER,
     zoom: 9,
   });
-  map.addControl(new maplibregl.NavigationControl(), "top-left");
+  // ズームボタンは左上のmenu-toggleボタンと重なるため右下に配置する。
+  map.addControl(new maplibregl.NavigationControl(), "bottom-right");
   attachMapHandlers();
+  // 画面が広い(デスクトップ相当)場合は、最初からサイドバーを開いておく。
+  if (window.innerWidth > 768) openSidebar();
 }
 
 initMap();

@@ -16,16 +16,26 @@
   <section>
     <h2>近距離検索</h2>
     <p class="hint">
-      地図をクリックして出発地・目的地を指定してください。専用道路を最優先に、
-      繋がらない場合は自転車レーン・車道混在(矢羽根等)、それでも繋がらない
-      場合は出発地・目的地周辺の一般道路網(その都度読み込みます)も使って
-      ブラウザ内で経路を探します(専用道路ほど優先度は高くありません)。
-      それでも繋がらない場合は「経路が見つかりません」と表示されるので、
-      その場合は下の事前計算ルートを確認してください。
+      地図をクリック、または地名で検索して出発地・目的地を指定してください。
+      専用道路を最優先に、繋がらない場合は自転車レーン・車道混在(矢羽根等)、
+      それでも繋がらない場合は出発地・目的地周辺の一般道路網(その都度読み込み
+      ます)も使ってブラウザ内で経路を探します(専用道路ほど優先度は高くあり
+      ません)。それでも繋がらない場合は「経路が見つかりません」と表示される
+      ので、その場合は下の事前計算ルートを確認してください。
     </p>
+    <div class="search-row">
+      <input type="text" id="search-from" placeholder="出発地を地名で検索(例: 品川駅)" />
+      <button id="btn-search-from">検索</button>
+    </div>
+    <ul id="search-from-results" class="search-results hidden"></ul>
+    <div class="search-row">
+      <input type="text" id="search-to" placeholder="目的地を地名で検索(例: 高崎駅)" />
+      <button id="btn-search-to">検索</button>
+    </div>
+    <ul id="search-to-results" class="search-results hidden"></ul>
     <div class="row">
-      <button id="btn-set-from">① 出発地をセット</button>
-      <button id="btn-set-to">② 目的地をセット</button>
+      <button id="btn-set-from">① 地図で出発地を指定</button>
+      <button id="btn-set-to">② 地図で目的地を指定</button>
       <button id="btn-clear">クリア</button>
     </div>
     <div id="nearby-result" class="result"></div>
