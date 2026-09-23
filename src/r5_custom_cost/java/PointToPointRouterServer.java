@@ -1097,6 +1097,15 @@ public class PointToPointRouterServer {
                 feature.addProperty("stateIdx", state.idx);
                 features.add(feature);
                 feature.addProperty("edgeIdx", edgeIdx);
+                // cycleway-router project: expose the same dedicated/general-road classification
+                // that JapanCycleCostSupplier used to pick this route, so the frontend can render a
+                // per-segment breakdown (which roads the route actually uses) instead of just an
+                // aggregate distance. bikeTimeFactor is 1.0 for dedicated cycleway/separated track,
+                // DEFAULT_GENERAL_ROAD_PENALTY (5.0) for general roads - see JapanCycleCostSupplier.
+                if (transportNetwork.streetLayer.edgeStore.edgeTraversalTimes != null) {
+                    double bikeFactor = transportNetwork.streetLayer.edgeStore.edgeTraversalTimes.getBikeTimeFactor(edgeIdx);
+                    feature.addProperty("dedicated", bikeFactor <= 1.0001);
+                }
             }
         }
     }

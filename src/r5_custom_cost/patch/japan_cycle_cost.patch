@@ -1,5 +1,5 @@
 diff --git a/src/main/java/com/conveyal/r5/point_to_point/PointToPointRouterServer.java b/src/main/java/com/conveyal/r5/point_to_point/PointToPointRouterServer.java
-index eea4a2f..b46a38e 100644
+index eea4a2f..9e4ec34 100644
 --- a/src/main/java/com/conveyal/r5/point_to_point/PointToPointRouterServer.java
 +++ b/src/main/java/com/conveyal/r5/point_to_point/PointToPointRouterServer.java
 @@ -371,7 +371,10 @@ public class PointToPointRouterServer {
@@ -14,6 +14,22 @@ index eea4a2f..b46a38e 100644
              //Split for end coordinate
              if (!streetRouter.setDestination(profileRequest.toLat, profileRequest.toLon)) {
                  content.put("errors", "Edge near the end coordinate wasn't found. Routing didn't start!");
+@@ -1094,6 +1097,15 @@ public class PointToPointRouterServer {
+                 feature.addProperty("stateIdx", state.idx);
+                 features.add(feature);
+                 feature.addProperty("edgeIdx", edgeIdx);
++                // cycleway-router project: expose the same dedicated/general-road classification
++                // that JapanCycleCostSupplier used to pick this route, so the frontend can render a
++                // per-segment breakdown (which roads the route actually uses) instead of just an
++                // aggregate distance. bikeTimeFactor is 1.0 for dedicated cycleway/separated track,
++                // DEFAULT_GENERAL_ROAD_PENALTY (5.0) for general roads - see JapanCycleCostSupplier.
++                if (transportNetwork.streetLayer.edgeStore.edgeTraversalTimes != null) {
++                    double bikeFactor = transportNetwork.streetLayer.edgeStore.edgeTraversalTimes.getBikeTimeFactor(edgeIdx);
++                    feature.addProperty("dedicated", bikeFactor <= 1.0001);
++                }
+             }
+         }
+     }
 diff --git a/src/main/java/com/conveyal/r5/streets/EdgeTraversalTimes.java b/src/main/java/com/conveyal/r5/streets/EdgeTraversalTimes.java
 index 07d515b..360abbb 100644
 --- a/src/main/java/com/conveyal/r5/streets/EdgeTraversalTimes.java

@@ -8,46 +8,120 @@
 <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
-<button id="menu-toggle">☰ メニュー</button>
+<!-- Googleマップの経路検索パネル風、地図上に常時表示する出発地・目的地パネル
+     (2026-09-22)。最初は目的地だけを聞き、指定できたら出発地の入力/地図
+     クリックへ自動的に移行する。両方揃うと経路がこのパネルの中に表示される。
+     メニューボタン(☰)はパネル外の独立した丸ボタンではなく、Googleマップの
+     検索バーと同様にパネル自体の中(左端)に含める(2026-09-22)。
+     2026-09-22追記: 「経路検索」ボタン(#btn-directions-mode、検索ボックスの右)を
+     新設し、押すまでは検索欄を枠・背景の無いフラットな見た目(メニューバーに
+     溶け込む、Googleマップの素の検索バー相当)にする。押すと#directions-panelに
+     .directions-modeが付き、従来通りの枠+グレー背景の入力欄になり、出発地の行も
+     すぐ表示される(revealOriginRow参照)。
+     2026-09-22さらに追記: 経路検索モードから戻るための専用の×ボタン
+     (#directions-clear)は廃止し、同じ#btn-directions-modeをもう一度押すと
+     入力内容ごとidle状態に戻るトグル式にした(main.jsのイベントリスナー参照)。
+     2026-09-22さらに追記2: 検索候補(.search-results)の区切り線を、メニュー・
+     経路検索アイコンの列も含めたパネル全幅まで届かせたいとの指摘を受け、
+     「メニュー・入力欄・経路検索ボタンの横並び行(#directions-toprow)」と
+     「検索候補・結果表示(全幅)」を分離した。スクロール(overflow-y:auto、
+     画面が低い時に備えるもの)は#directions-panel-scrollにまとめて持たせ、
+     #directions-panelそのものは角丸・影・パディションを持つだけの外枠にする
+     (スクロールバーで角丸が欠けないように、以前から#directions-panel自体には
+     overflowを持たせていない)。 -->
+<div id="directions-panel">
+  <div id="directions-panel-scroll">
+    <div id="directions-toprow">
+      <button id="menu-toggle" aria-label="メニュー">☰</button>
+      <div id="directions-panel-body">
+        <div id="directions-inputs">
+          <div class="directions-row hidden" id="from-row">
+            <span class="directions-icon directions-icon-from"></span>
+            <input type="text" id="search-from" placeholder="出発地を入力するか、地図をクリック" />
+          </div>
+          <div class="directions-row" id="to-row">
+            <span class="directions-icon directions-icon-to"></span>
+            <input type="text" id="search-to" placeholder="目的地を入力するか、地図をクリック" />
+          </div>
+          <button id="btn-swap-points" class="hidden" aria-label="出発地と目的地を入れ替え">⇅</button>
+        </div>
+      </div>
+      <!-- 2026-09-22追記: 検索ボックスの右に配置する(ユーザー指摘: 「メニューバーの
+           経路検索に移るボタンは検索ボックスの右にしてください」。以前は
+           menu-toggleの右・検索ボックスの左だった)。 -->
+      <button id="btn-directions-mode" aria-label="経路検索">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="19" r="2.5"></circle>
+          <circle cx="18" cy="5" r="2.5"></circle>
+          <path d="M8 17.3C9.5 12.5 13 11 15.8 6.8" stroke-dasharray="2.2 2.2"></path>
+        </svg>
+      </button>
+    </div>
+    <!-- 検索候補は個々の入力欄のすぐ下ではなく、入力欄2行をまとめたツールボックス
+         (#directions-inputs)の下にまとめて、#directions-toprowと同じ全幅で出す
+         (2026-09-22、Googleマップ同様)。 -->
+    <ul id="search-from-results" class="search-results hidden"></ul>
+    <ul id="search-to-results" class="search-results hidden"></ul>
+    <div id="nearby-result" class="result hidden"></div>
+    <button id="btn-gpx-nearby" class="hidden">GPXでダウンロード(Garmin等のサイコン用)</button>
+  </div>
+</div>
+<!-- Googleマップの右上カテゴリタグ(レストラン・ホテル等)を模したチップ列
+     (2026-09-22)。「サイクリングロード」を選ぶと目的地(または出発地)欄に
+     自動入力され、候補にdocs/data/highway_routes.geojsonの登録済みルートが
+     並ぶ(main.jsのonCategoryChipClick参照)。画面が狭い時は検索ブロックの下に
+     移動する(updateCategoryChipsPosition)。 -->
+<div id="category-chips">
+  <button type="button" class="category-chip" data-category="cycling-road" data-label="サイクリングロード">
+    <span class="category-chip-icon">🚴</span>
+    サイクリングロード
+  </button>
+</div>
+<div id="sidebar-backdrop"></div>
 <div id="sidebar">
+  <button id="sidebar-close" aria-label="閉じる">×</button>
   <h1>自転車専用道路 経路検索<span class="badge">試作版</span></h1>
 
   <section>
-    <h2>近距離検索</h2>
+    <h2>近距離検索について</h2>
     <p class="hint">
-      地図をクリック、または地名で検索して出発地・目的地を指定してください。
-      専用道路を最優先に、繋がらない場合は自転車レーン・車道混在(矢羽根等)、
-      それでも繋がらない場合は出発地・目的地周辺の一般道路網(その都度読み込み
-      ます)も使ってブラウザ内で経路を探します(専用道路ほど優先度は高くあり
-      ません)。それでも繋がらない場合は「経路が見つかりません」と表示される
-      ので、その場合は下の事前計算ルートを確認してください。
+      出発地・目的地は地図上部のパネルから指定します(入力または地図クリック)。
+      現在地が取得できていれば出発地として自動的に使い、目的地を選んだ時点で
+      すぐにルート検索します。専用道路を最優先に、繋がらない場合は自転車
+      レーン・車道混在(矢羽根等)、それでも繋がらない場合は出発地・目的地
+      周辺の一般道路網(その都度読み込みます)も使ってブラウザ内で経路を
+      探します(専用道路ほど優先度は高くありません)。それでも繋がらない場合は
+      「経路が見つかりません」と表示されるので、その場合は下の事前計算ルートを
+      確認してください。
     </p>
-    <div class="search-row">
-      <input type="text" id="search-from" placeholder="出発地を地名で検索(例: 品川駅)" />
-      <button id="btn-search-from">検索</button>
-    </div>
-    <ul id="search-from-results" class="search-results hidden"></ul>
-    <div class="search-row">
-      <input type="text" id="search-to" placeholder="目的地を地名で検索(例: 高崎駅)" />
-      <button id="btn-search-to">検索</button>
-    </div>
-    <ul id="search-to-results" class="search-results hidden"></ul>
-    <div class="row">
-      <button id="btn-set-from">① 地図で出発地を指定</button>
-      <button id="btn-set-to">② 地図で目的地を指定</button>
-      <button id="btn-clear">クリア</button>
-    </div>
-    <div id="nearby-result" class="result"></div>
-    <button id="btn-gpx-nearby" class="hidden">GPXでダウンロード(Garmin等のサイコン用)</button>
   </section>
 
   <section>
-    <h2>専用度合いの凡例</h2>
+    <h2>表示オプション</h2>
+    <p class="hint">専用度合いの凡例は地図左下に表示しています。各項目の説明は次の通りです。</p>
+    <dl class="legend-explain">
+      <dt>サイクリングロード</dt>
+      <dd>多摩川サイクリングロードなど、著名な専用道路をユーザーが個別に登録したもの(地図上は緑の縁取り+太字の名前で強調表示)</dd>
+      <dt>完全専用</dt>
+      <dd>自転車専用で、歩行者は通行できない区間</dd>
+      <dt>専用・歩行者と分離</dt>
+      <dd>自転車専用で、歩行者用の通路が別に分かれている区間</dd>
+      <dt>専用・歩行者共用</dt>
+      <dd>自転車と歩行者が同じ通路を共用する区間</dd>
+      <dt>専用</dt>
+      <dd>自転車専用であることは分かるが、歩行者の可否等の詳細が不明な区間</dd>
+      <dt>分離型自転車道</dt>
+      <dd>車道に柵・縁石等で分離された自転車道(自治体データ等からの近似)</dd>
+      <dt>自転車専用通行帯・ペイントのみ</dt>
+      <dd>車道上に自転車専用のペイント区分があるだけで、車道から分離されていない区間(参考。専用道路が繋がらない場合の補完として使う)</dd>
+      <dt>車道混在・矢羽根等</dt>
+      <dd>矢羽根等のナビマークがあるだけで、車と同じ車線を走る区間(参考。専用道路・自転車レーンが繋がらない場合の補完として使う)</dd>
+    </dl>
     <label class="checkbox-row">
       <input type="checkbox" id="toggle-reference" />
       自転車レーン・車道混在を地図上に表示(近距離検索では表示に関わらず利用します)
     </label>
-    <div id="legend"></div>
   </section>
 
   <section>
@@ -56,13 +130,17 @@
       専用道路ネットワークが分断されていて近距離検索では届かないような長距離の
       行き先は、開発コンテナ内でR5(専用道路優先のカスタムコスト付き)を使って
       あらかじめ計算した結果をここに置いています。任意の2地点ではなく、
-      登録済みの行き先から選ぶ形式です。
+      登録済みの行き先から選ぶ形式です。選ぶと、地図上部の検索パネルに
+      通常の経路検索結果と同じように出発地・目的地・結果が表示されます。
     </p>
-    <select id="route-select">
+    <!-- 2026-09-22: 地図側のroute-resultソース(main.jsのattachMapHandlers、
+         Promise.allでの他データ読み込み完了後に追加)がまだ無い状態で選択すると
+         showPrecomputedRouteInPanel内でmap.getSource("route-result")がundefined
+         になり例外で処理が止まる(=選択しても結果に反映されない)不具合があった
+         ため、準備が整うまでdisabledにしておく(main.jsが読み込み完了後に解除)。 -->
+    <select id="route-select" disabled>
       <option value="">-- ルートを選択 --</option>
     </select>
-    <div id="route-result" class="result"></div>
-    <button id="btn-gpx-route" class="hidden">GPXでダウンロード(Garmin等のサイコン用)</button>
   </section>
 
   <section id="attribution-section">
@@ -71,6 +149,10 @@
   </section>
 </div>
 <div id="map"></div>
+<div id="map-legend"></div>
+<!-- 地図と連動するスケールバー(2026-09-22)。中身(maplibregl-ctrl-scale)は
+     main.jsのinitMapがmaplibregl.ScaleControlから付け替える。 -->
+<div id="map-scale"></div>
 
 <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
 <script src="assets/graph.js"></script>

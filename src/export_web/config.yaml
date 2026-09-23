@@ -5,7 +5,11 @@ input:
   shared_lane_raw: "data/raw/osm_survey/kanto_shared_lane.json"
 
 output:
-  cycleway_geojson: "docs/data/cycleway_network.geojson"
+  # cycleway_geojsonは、以前はここが最終成果物(docs/data/cycleway_network.geojson)
+  # だったが、src/network_merge/でのデータソース優先順位マージ(手動→自治体→OSM)を
+  # 挟むようになったため、OSM由来の中間ファイルに変更した(2026-09-22)。
+  # 最終成果物の生成は src/network_merge/build_priority_network.py が行う。
+  cycleway_geojson: "data/interim/cycleway_network_osm.geojson"
   reference_geojson: "docs/data/reference_infrastructure.geojson"
   routes_dir: "docs/data/routes"
   routes_index: "docs/data/routes/index.json"

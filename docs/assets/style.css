@@ -36,23 +36,392 @@ html, body {
   transform: translateX(0);
 }
 
+/* Googleマップ風: メニューを開くと背景の地図が薄暗くなる。サイドバー自体より
+   下、地図より上のz-index(2026-09-22)。 */
+#sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+#sidebar-backdrop.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* メニューボタンは#directions-panel内(左端)に含める(2026-09-22、以前は
+   パネル外の独立した丸ボタンだったが、Googleマップの検索バーのようにパネルに
+   埋め込む形に変更)。パネル自体が白背景・角丸・影を持つため、ボタン自体は
+   枠・背景・影の無いプレーンなアイコンにし、ホバー時だけ薄い円形の背景を出す
+   (#sidebar-closeや#btn-swap-pointsと同じ考え方)。
+   2026-09-22追記: 高さを検索欄の行(.directions-row、実質36px)と揃える
+   (以前は40pxで、両方とも上端を揃えていても検索欄より4px背が高い分だけ
+   中心がずれ、「検索枠だけ上にずれて見える」という指摘につながっていた)。 */
 #menu-toggle {
+  flex: none;
+  align-self: flex-start;
+  width: 36px;
+  height: 36px;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  box-shadow: none;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: #555;
+  cursor: pointer;
+}
+
+#menu-toggle:hover {
+  background: #f1f3f4;
+}
+
+/* 「経路検索」ボタン(2026-09-22新設)。menu-toggleと同じプレーンな丸アイコン
+   ボタンだが、経路検索モードに入っている間は薄い青で「有効」なことを示す
+   (#category-chip.activeと同じ考え方)。 */
+#btn-directions-mode {
+  flex: none;
+  align-self: flex-start;
+  width: 36px;
+  height: 36px;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  box-shadow: none;
+  color: #555;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#btn-directions-mode:hover {
+  background: #f1f3f4;
+}
+
+#btn-directions-mode.active {
+  background: #e8f0fe;
+  color: #1a73e8;
+}
+
+/* サイドバー内のバツボタンは、パネルの右上(Googleマップのメニュー同様)に
+   固定表示する。開いている時だけJS側でdisplayを切り替える。
+   2026-09-22: 丸ボタンにする必要は無いとの指摘を受け、枠や背景の無い
+   プレーンな×だけにした。 */
+#sidebar-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1001;
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #555;
+  cursor: pointer;
+  display: none;
+}
+
+/* Googleマップの経路検索パネル風、地図上に常時表示する出発地・目的地パネル
+   (2026-09-22)。Googleマップの検索バーに近い丸み(border-radius)を持たせる。
+   最初は目的地の行だけが見えていて、指定されると出発地の行(#from-row)が
+   現れる(JS側で"hidden"クラスを外す)。
+   2026-09-22さらに追記: 検索候補の区切り線をメニュー・経路検索アイコンの列も
+   含めた全幅まで届かせるため、「menu-toggle・入力欄・btn-directions-modeの
+   横並び行」(#directions-toprow、display:flex)と「検索候補・結果表示」を
+   兄弟要素として同じ#directions-panel-scrollの中に並べる構成に変更した。
+   これにより検索候補側は#directions-toprowと同じ幅(パネル自体のpaddingだけを
+   差し引いた全幅)になり、負のmargin等でインセットを打ち消す小細工が不要に
+   なる。#directions-panel自体はdisplay:flexをやめ、角丸・影・paddingだけを
+   持つ外枠にする。 */
+#directions-panel {
   position: fixed;
   top: 10px;
   left: 10px;
+  width: 400px;
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 20px);
   z-index: 1001;
   background: white;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  border-radius: 20px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+
+/* パネルの中身全体(横並び行+検索候補・結果表示)をまとめて縦スクロールさせる
+   (画面が低い時に備える。パネル自体の角丸がスクロールバーで欠けないように、
+   スクロールはここに閉じ込め#directions-panel自体には持たせない)。 */
+#directions-panel-scroll {
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+/* menu-toggle・入力欄(#directions-panel-body)・btn-directions-modeを
+   横並びにする行。以前は#directions-panel自体がこのflexコンテナだった。 */
+#directions-toprow {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* サイドバー(メニュー)を開いている間、#directions-panelと#category-chipsに
+   付く(main.jsのopenSidebar/closeSidebar参照)。以前はメニューを開くと
+   このパネルをサイドバーの右隣に押しやったり、モバイル幅では隠したりして
+   いたが、「検索バーが移動する必要はなく、地図と同じように暗く表示される
+   だけでいい」との指摘を受け、位置はそのままにz-indexだけ#sidebar-backdrop
+   (999)より下げることにした。これにより地図と全く同じ仕組み(半透明の黒い
+   #sidebar-backdropが上から覆う)で暗くなり、クリックもできなくなる
+   (2026-09-22)。 */
+#directions-panel.dimmed-by-menu,
+#category-chips.dimmed-by-menu {
+  z-index: 500;
+}
+
+/* 入力欄(#directions-inputs)本体。#directions-toprow内でメニュー・
+   経路検索ボタン分を除いた残り幅いっぱいに広がる。 */
+#directions-panel-body {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+/* 出発地・目的地の2行と入れ替えボタンをまとめるコンテナ。ボタンをここを
+   基準に絶対配置することで、2行の間に空欄を作らず右端に置ける(2026-09-22、
+   ユーザー指摘: 「入れ替えボタンは右側にして、間に変な空欄が生まれない
+   ように」)。 */
+#directions-inputs {
+  position: relative;
+  padding-right: 0;
+}
+
+/* 入れ替えボタン(⇅)も出発地が決まるまで非表示なので、同様にその間は
+   右余白を確保しない(2026-09-22)。 */
+#directions-inputs:has(#btn-swap-points:not(.hidden)) {
+  padding-right: 34px;
+}
+
+.directions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+/* 行間の余白(from-row/to-rowの間)は必要だが、末尾(to-row)の余白は不要なので
+   0にする(2026-09-22、ユーザー指摘: 上下の余白バランスが不揃いに見えていた)。
+   検索候補・結果表示が現れる場合は、それらの要素自身がmargin-top/border-topで
+   間隔を持つため、ここを0にしても詰まりすぎない。 */
+#directions-inputs .directions-row:last-of-type {
+  margin-bottom: 0;
+}
+
+/* 2026-09-22: 「経路検索」ボタン(#btn-directions-mode)を押すまでは、検索欄は
+   枠・背景の無いフラットな見た目にする(パネルの白背景に溶け込ませ、
+   メニューバーの一部のように見せる、というユーザー要望)。ボタンを押すと
+   #directions-panelに.directions-modeが付き、下のルールで今までどおりの
+   枠+グレー背景に切り替わる。 */
+.directions-row input[type="text"] {
+  flex: 1;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #ffffff;
+  font-size: 0.85rem;
+  /* 2026-09-22: 経路検索モードに入る前(フラット表示中)にクリックして入力すると
+     ブラウザ標準のフォーカスリングが枠のように出てしまう、との指摘を受け、
+     常時outlineを消す(idle時の枠だけが不要という指摘だが、directions-mode側も
+     枠+グレー背景そのものでフォーカス位置は十分わかるため、一貫してリング無しにする)。 */
+  outline: none;
+}
+
+#directions-panel.directions-mode .directions-row input[type="text"] {
+  border-color: #ddd;
+  background: #f1f3f4;
+}
+
+/* Googleマップの経路パネルと同じ、出発地=白丸(グレーの縁取り)、
+   目的地=赤いピンのアイコン。2026-09-22: 以前はどちらも同じ色付き丸
+   (.directions-dot)だったが、「目的地は赤丸でなく赤いピンに、出発地は
+   白丸に」との指摘で変更。出発地アイコンの下に伸びる点線
+   (::after)で2行をつなぎ、目的地アイコンが現れる場所を示す。 */
+.directions-icon {
+  flex: none;
+  width: 10px;
+  height: 10px;
+}
+
+.directions-icon-from {
+  position: relative;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid #6b6f76;
+}
+
+.directions-icon-from::after {
+  content: "";
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  width: 0;
+  height: 30px;
+  transform: translateX(-50%);
+  border-left: 2px dotted #9aa0a6;
+}
+
+/* Googleマップの目的地ピンと同じ、外側から赤→白→赤の同心円にする
+   (2026-09-22、ユーザー指摘: 「外側から赤白赤の順になるように」)。
+   radial-gradientで、ピン先端を回転で作る前(まだ円形の時点)の中心から
+   同心円状に色を敷く。 */
+.directions-icon-to {
+  width: 12px;
+  height: 12px;
+  margin-top: -3px;
+  background: radial-gradient(circle, #d33 0 22%, white 22% 55%, #d33 55% 100%);
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+}
+
+/* 2026-09-22: 「経路検索画面に移行していない段階(directions-modeに入る前)の
+   検索ブロックには目的地アイコンは不要、その分入力を左に詰めてほしい」との
+   指摘を受け、idle時は目的地ピンを消す。flexのgapは非表示(display:none)の
+   アイテムには適用されないため、アイコンを消すだけで入力欄が自動的に
+   左に詰まる。 */
+#directions-panel:not(.directions-mode) .directions-icon-to {
+  display: none;
+}
+
+/* 2026-09-22: 丸い枠は不要との指摘を受け、常時は枠・背景無しのプレーンな
+   アイコンにし、ホバー時だけ薄い円形の背景を出す(枠線としては表示しない)。 */
+#btn-swap-points {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: #555;
+  cursor: pointer;
+}
+
+#btn-swap-points:hover {
+  background: #eee;
+}
+
+/* 専用度合いの凡例は、メニューではなく地図上に常時表示する(2026-09-22、
+   ユーザー方針: 「凡例はメニューに要らない、地図上に表示して」)。
+   位置は左下(2026-09-22、右上はGoogleマップ風のカテゴリタグ(#category-chips)に
+   譲ったため左下へ移動。左下はMapLibreの標準コントロール(ズーム等は右下に
+   個別配置済み、attributionはデフォルトの右下)と重ならない)。 */
+#map-legend {
+  position: fixed;
+  left: 10px;
+  bottom: 10px;
+  z-index: 900;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  padding: 8px 10px;
+  max-width: 220px;
+}
+
+/* 地図と連動するスケールバー(2026-09-22)。ズーム・現在地ボタンの列
+   (右下、幅約29px+余白10px)の左に来るよう固定位置で置く。中身は
+   maplibregl.ScaleControlが生成するDOM要素をinitMapで付け替えたもの
+   (距離の再計算・表示更新はMapLibre側が自動で行う)。 */
+#map-scale {
+  position: fixed;
+  right: 50px;
+  bottom: 36px;
+  z-index: 900;
+}
+
+/* Googleマップの右上カテゴリタグ(レストラン・ホテル等)を模したチップ列
+   (2026-09-22)。このアプリでは「サイクリングロード」等、登録済みの著名な
+   専用道路を検索候補として即座に呼び出すためのショートカットとして使う。
+   クリックすると出発地・目的地パネルの該当欄(nextPickKindで決まる方)に
+   文字が自動入力され、候補として登録済みルート名が並ぶ(main.js参照)。
+   デスクトップでは地図右上に浮かせるが、画面が狭い時は検索ブロック
+   (#directions-panel)の下に来るようJS側(updateCategoryChipsPosition)で
+   位置を切り替える。 */
+#category-chips {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  /* #directions-panelと同じz-index(2026-09-22)。サイドバーが開いている間は
+     .dimmed-by-menuが付いてこれより下がり、#sidebar-backdropに覆われて
+     地図と同じように暗くなる(閉じている時はこの値のまま前面に出る)。 */
+  z-index: 1001;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  max-width: calc(100vw - 20px);
+}
+
+.category-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid #dadce0;
+  border-radius: 20px;
+  background: white;
+  color: #3c4043;
+  font-size: 0.8rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.category-chip:hover {
+  background: #f1f3f4;
+}
+
+.category-chip.active {
+  background: #e8f0fe;
+  border-color: #1a73e8;
+  color: #1a73e8;
+}
+
+.category-chip-icon {
+  display: inline-flex;
+  flex: none;
 }
 
 /* MapLibreの標準ズームコントロールは左上に出るため、menu-toggleと重ならないよう
    右下に配置する(main.jsのaddControl呼び出し側と対応)。 */
 
+/* 現在地に戻るボタン(main.jsのLocateControl)。ズームボタンと同じ
+   maplibregl-ctrl-groupを使っているのでサイズ・枠・影は自動的に揃うが、
+   中のアイコン(svg)は自前で中央寄せする(2026-09-22)。 */
+.maplibregl-ctrl-locate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #333;
+}
+
 h1 {
   font-size: 1.1rem;
   margin-bottom: 4px;
+  /* #sidebar-close(右上に絶対配置)とタイトル文字が重ならないよう余白を空ける
+     (2026-09-22)。 */
+  padding-right: 36px;
 }
 
 .badge {
@@ -77,6 +446,23 @@ h2 {
   font-size: 0.78rem;
   color: #555;
   line-height: 1.5;
+}
+
+/* 地図上の凡例(#map-legend)から外した、各項目の簡潔な説明(2026-09-23)。 */
+.legend-explain {
+  margin: 6px 0 12px;
+}
+.legend-explain dt {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #333;
+  margin-top: 6px;
+}
+.legend-explain dd {
+  font-size: 0.75rem;
+  color: #555;
+  line-height: 1.4;
+  margin: 1px 0 0;
 }
 
 .row {
@@ -107,27 +493,63 @@ input[type="text"] {
   flex: 1;
 }
 
+/* 検索候補は入力欄のすぐ下ではなく、2行分の入力欄(#directions-inputs、
+   「検索ツールボックス」)全体の下にまとめて出す(2026-09-22、ユーザー指摘:
+   「検索ボックスのすぐ下ではなく検索ツールボックスの下に」)。
+   2026-09-22さらに追記: 独立した角丸・影付きのカードにしていたが、
+   「Googleマップと同じように、検索ツールボックスの下に線が入って、そこから
+   フラットな行が並ぶ見た目にしてほしい」との指摘を受け、カード自体の枠・
+   角丸・影・余白は無くし(#directions-panel-bodyに溶け込ませる)、
+   検索ツールボックスとの境目にだけ線(border-top)を入れる形に変更した。
+   2026-09-22さらに追記2: 「区切り線はメニュー・経路検索アイコン部分も含めた
+   パネル左端から右端まで引いてほしい、入力欄との間にもう少し隙間を、候補
+   同士を区切る線は不要」との指摘を受け、以下の変更を行った:
+   - 検索候補(.search-results)は、#directions-panel-body(横並び行の中で
+     メニュー・経路検索ボタン分だけ内側にインセットされた要素)の子では
+     なく、その行全体(#directions-toprow)と同じ#directions-panel-scrollの
+     直接の子(兄弟要素)にした(index.html参照)。これにより特別なCSSを
+     書かなくても最初からパネル全幅(パネル自体のpaddingだけを差し引いた幅)
+     になり、border-topがメニュー・経路検索アイコンの列の真下まで届く。
+   - margin-topで入力欄との間隔を確保。
+   - 候補同士の区切り線(li側のborder-top)は撤去し、パネル全体の上端の
+     線(ul側のborder-top、この行だけ)のみ残す。
+   2026-09-22さらに追記3: 「検索候補の左端を、検索を入力する部分の左端と
+   揃えてほしい」との指摘を受け、ul自体のpadding-leftをJS側
+   (alignSearchResultsToInput、main.js)で実測して都度セットするようにした
+   (メニューの開閉状態・目的地欄のアイコン表示/非表示によって入力欄側の
+   左インセットが変わるため、固定値では揃わない)。liの左paddingは0にして
+   二重にインセットされないようにする(右側は従来通りliのpaddingで確保)。
+   2026-09-23追記: 「左側が寂しいので文字列の左にアイコンを」との指摘を
+   受け、.search-result-icon(main.jsが候補ごとに追加)をliのpadding-left
+   領域(ulのpadding-leftが確保している、テキストより左の余白)に
+   position:absoluteで配置する。 */
 .search-results {
   list-style: none;
-  margin: 0 0 8px;
+  margin: 8px 0 0;
   padding: 0;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
+  border-top: 1px solid #e0e0e0;
 }
 
 .search-results li {
-  padding: 5px 6px;
-  border: 1px solid #ddd;
-  border-top: none;
-  background: white;
+  position: relative;
+  padding: 10px 12px 10px 0;
+  border: none;
+  background: transparent;
   cursor: pointer;
 }
 
-.search-results li:first-child {
-  border-top: 1px solid #ddd;
+.search-results li:hover {
+  background: #f1f3f4;
 }
 
-.search-results li:hover {
-  background: #eef5ff;
+.search-result-icon {
+  position: absolute;
+  left: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9aa0a6;
+  display: inline-flex;
 }
 
 .result {
@@ -142,6 +564,24 @@ input[type="text"] {
 .result .ok { color: #2a7a2a; }
 .result .ng { color: #b33; }
 
+/* 近距離検索結果(#nearby-result)は、Googleマップのように枠で囲うのではなく、
+   検索ツールボックスとの間を横線1本で区切るだけにする(2026-09-22、
+   ユーザー指摘: 「検索結果は変な枠で囲うのではなく、経路検索と検索結果の間を
+   線で区切ってほしい」)。.resultの共通スタイル(枠付きボックス)は
+   #route-result(長距離ルート側)で引き続き使うため、ここで個別に上書きする。
+   2026-09-23追記: 検索候補(.search-results)は全幅のままにする一方、
+   「経路検索結果の場合だけ左右に少し余白を」との指摘を受け、
+   #nearby-result(近距離検索・長距離事前計算ルートどちらの結果もここに出る)
+   にだけ左右paddingを追加した。 */
+#nearby-result {
+  background: none;
+  border: none;
+  border-radius: 0;
+  border-top: 1px solid #e0e0e0;
+  padding: 10px 12px 0;
+  margin-top: 4px;
+}
+
 #attribution-section {
   margin-top: 24px;
 }
@@ -152,23 +592,143 @@ button.active {
   border-color: #337ab7;
 }
 
-.pin-from, .pin-to {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
+/* 出発地: 文字の無いシンプルな丸(2026-09-22、ユーザー指摘: 「色のついた丸に
+   日本語で出・目と表示するのはやめてください」)。2026-09-23: 「出発地は
+   白丸で」との指摘を受け、緑地に白縁取りから白地にグレー縁取りに変更した
+   (パネル内の出発地アイコン.directions-icon-fromと同じ配色)。
+   2026-09-23さらに追記: 「目的地より出発地の方が目立っているので、出発地を
+   もう少し小さく」との指摘を受け、16px→12pxに縮小した(縁取りもそれに
+   合わせて3px→2.5pxに)。
+   2026-09-23さらに追記2: 「経路検索結果のルート上に出てくる白丸(区間の
+   切り替わり地点、search-result-junctionsレイヤー)と同じ大きさに」との
+   指摘を受け、さらに縮小した。search-result-junctionsは
+   circle-radius: zoom12→3, 15→5, 18→8(+circle-stroke-width 2)という
+   ズーム連動のcircleレイヤーで、この出発地マーカー(固定pxのHTML要素)とは
+   仕組みが違うため厳密な一致はしないが、近距離検索でよく見るズーム帯
+   (15前後、直径 5*2+2*2=14px相当)に合わせて10px(縁取り2px、合計直径14px)に
+   縮小した。 */
+.pin-from {
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  color: white;
-  font-size: 11px;
-  font-weight: bold;
+  background: white;
+  border: 2px solid #6b6f76;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
-.pin-from { background: #2a7a2a; }
-.pin-to { background: #b33; }
+/* 目的地: Googleマップ風の先端がとがったピン(CSSのみ、画像不要)。
+   border-radiusで角丸の四角を作り45度回転させることで水滴型にする。
+   マーカーのanchorは"bottom"にして、先端の座標が実際の地点を指すようにする
+   (main.jsのnew maplibregl.Marker呼び出し側で指定)。
+   2026-09-23: 「添付画像のようなピンにしてほしい」との指摘を受け、
+   ::afterの中心の点を「白リングを挟んだ赤(的のような同心円)」から
+   「一色のやや濃い赤の点」に変更した(下記::after参照)。
+   2026-09-23さらに追記: 上記の変更時にborder-radiusを60% 60% 50% 0に
+   していたが、この非対称な丸め方だと先端(0の角、rotateで下を向かせる部分)が
+   真下からずれて見えてしまう(「ピンが真下を向くように」との指摘)。先端を
+   確実に真下に向けるには、先端以外の3つの角を同じ丸め方(50%=円)にする
+   必要があるため、標準的な水滴ピンの作り方である50% 50% 50% 0に戻した。
+   2026-09-23さらに追記2: それでも先端が左斜め下を指いてしまう不具合が
+   残っていた。原因は、回転(rotate)をmaplibregl.Markerに渡す要素自身に
+   かけていたこと。MarkerはマーカーをY地点に配置するため、この要素の
+   style.transformをJS側で(translate(...)の形で)毎回上書きする。CSSの
+   `transform: rotate(-45deg)`は同じ要素の同じCSSプロパティなので、Marker位置
+   決め用のtranslateにまるごと上書きされて実際には効いていなかった(見た目上は
+   回転前の水滴型=先端が135度=左斜め下、のままになっていた)。対策として、
+   Markerに渡す.pin-to自体には位置決め用のサイズだけを持たせ、見た目(色・
+   丸め・回転)は内側の子要素に移すことで、Markerのtransform上書きの影響を
+   受けないようにした。
+   2026-09-23さらに追記3: 「先端をもう少し長く尖らせてほしい」との指摘を受けた。
+   1個の要素を回転させる方式(正方形なら45度回転で綺麗な水滴型になるが、
+   先端を伸ばすには縦長の長方形にする必要があり、その場合は回転角度も
+   45度から計算し直す必要があるうえ、角の丸め(border-radius: 50%)も縦長の
+   箱では真円ではなく楕円になり、見た目が卵のように傾いた形になってしまう
+   (実験して確認した)。そのため、回転を使う方式をやめ、円(.pin-to-head)と
+   下向き三角形(.pin-to-point、border-trickで作る先端)を別要素として重ねる
+   方式に変更した。三角形はborder-topの高さ(先端の長さ)だけを変えれば、
+   頭の円の形には一切影響を与えずに先端の長さ・鋭さだけを調整できる。
+   影(box-shadow)は個々の要素に付けると三角形側は透明な角を含む矩形の影に
+   なってしまうため、.pin-to全体にfilter: drop-shadowをかけて円+三角形の
+   輪郭に沿った自然な影にした(filterはMarkerがJS側で上書きするtransformとは
+   別のCSSプロパティなので、rotateの時と同じ上書き問題は起きない)。 */
+.pin-to {
+  position: relative;
+  width: 22px;
+  height: 34px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+.pin-to-head {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 1;
+  transform: translateX(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e14b3f;
+}
+
+/* 2026-09-23: 添付画像のピンに合わせ、白リングを廃止し一色のやや濃い赤の
+   点だけにした。 */
+.pin-to-head::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: #8a2116;
+}
+
+/* 円(.pin-to-head)の下端に少し食い込ませて(8px重ねて)継ぎ目が見えないように
+   配置した、下向きの先端(CSSのborder-trickで三角形を作る定番の方法)。 */
+.pin-to-point {
+  position: absolute;
+  left: 50%;
+  margin-left: -8px;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 20px solid #e14b3f;
+}
+
+/* Googleマップの現在地表示(青い点+白い縁取り)を模した、現在地取得
+   (navigator.geolocation)による出発地マーカー(2026-09-22)。 */
+.current-location-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #1a73e8;
+  border: 3px solid white;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25), 0 1px 4px rgba(0, 0, 0, 0.4);
+}
 
 .hidden {
   display: none !important;
+}
+
+/* 近距離検索結果の見出し(Googleマップの「21分 (6.9km)」を模した、所要時間を
+   大きく・距離をその横に小さく添える表示。2026-09-22)。 */
+.route-summary {
+  margin-bottom: 4px;
+}
+
+.route-summary-time {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: #202124;
+}
+
+.route-summary-distance {
+  font-size: 0.85rem;
+  color: #5f6368;
+  margin-left: 6px;
 }
 
 .checkbox-row {
@@ -179,9 +739,14 @@ button.active {
   margin-bottom: 8px;
 }
 
+/* 2026-09-22: <ol>の番号用に20pxの左余白があったが、liをdisplay:flexにしている
+   影響で番号(マーカー)自体は表示されておらず、ただの無駄な余白になっていた
+   (ユーザー指摘: 「左に変なスペースが生まれてしまっている」)。番号は使わない
+   ので余白ごと削除する。 */
 .segment-list {
   margin: 6px 0;
-  padding-left: 20px;
+  padding-left: 0;
+  list-style: none;
   font-size: 0.78rem;
 }
 
@@ -190,6 +755,54 @@ button.active {
   display: flex;
   align-items: center;
   gap: 6px;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 4px;
+}
+
+/* クリックすると地図上の該当箇所が強調されることが分かるよう、ホバー時に
+   軽くハイライトする(2026-09-22)。 */
+.segment-list li:hover {
+  background: #f1f3f4;
+}
+
+/* 2026-09-23: 「その道路が地図上で強調されている間は、どの道路をクリック
+   したのかわかるように」との指摘を受け、クリックした区間には選択中である
+   ことがわかる見た目を付ける(main.jsが.selectedを付け外しする)。色は
+   地図上のハイライト(search-result-highlight、#f9ab00)に合わせる。
+   2026-09-23追記: 「左端の濃いオレンジの枠線は無くしてほしい」との指摘を
+   受け、box-shadow(inset accent bar)を削除し背景色だけにした。 */
+.segment-list li.selected {
+  background: #fef3da;
+}
+
+.segment-list li.selected:hover {
+  background: #fdecc0;
+}
+
+/* 道路種別(ラベル)の右に所要時間・距離を添える(2026-09-22、一度は下の行に
+   配置したが「やっぱり道路名称の右で良いかもしれません」との指摘で1行に
+   戻した)。2026-09-22追記: 所要時間・距離はliの右端に揃える(ユーザー指摘)。
+   flex:1でli内の残り幅いっぱいに広げたうえでspace-betweenにすることで、
+   ラベルは左端、所要時間・距離は右端に配置する。 */
+.segment-text {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  flex: 1;
+}
+
+.segment-meta {
+  font-size: 0.72rem;
+  color: #5f6368;
+}
+
+/* 区間種別(自転車道/一般道路)を示すアイコン(2026-09-22)。 */
+.segment-icon {
+  display: inline-flex;
+  flex: none;
 }
 
 .legend-row {
@@ -208,9 +821,7 @@ button.active {
 }
 
 .legend-swatch.dashed {
-  background-image: linear-gradient(90deg, currentColor 60%, transparent 40%);
-  background-size: 6px 4px;
   background-color: transparent !important;
-  border-top: 4px dashed #984ea3;
+  border-top: 4px dashed currentColor;
   height: 0;
 }

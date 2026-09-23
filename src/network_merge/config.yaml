@@ -1,0 +1,25 @@
+# 優先順位順(先に書いたレイヤーほど優先度が高い)。
+# 同じ場所に複数レイヤーの線が重複する場合、優先度の低いレイヤー側を
+# 空間的に間引く(2026-09-22、ユーザー方針)。
+layers:
+  - name: manual
+    source_prefix: "manual"
+    paths: ["data/manual/manual_network.geojson"]
+    default_tier: 2
+  - name: municipal
+    source_prefix: "municipal"
+    paths: ["data/processed/municipal/*.geojson"]
+    default_tier: 2
+  - name: osm
+    source_prefix: "osm"
+    paths: ["data/interim/cycleway_network_osm.geojson"]
+    default_tier: null # OSMレイヤーは既にtierが付与済みなので使わない
+
+output:
+  cycleway_geojson: "docs/data/cycleway_network.geojson"
+  attribution: "docs/data/attribution.json"
+
+# export_web/config.yamlと同じ値を踏襲(重複除去の投影・丸め精度をOSM側と揃える)。
+dedup_buffer_m: 15
+metric_crs: "EPSG:32654"
+coordinate_precision_digits: 6

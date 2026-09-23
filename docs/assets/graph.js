@@ -45,18 +45,28 @@ const CycleGraph = (() => {
     }
 
     for (const feature of geojson.features) {
-      const coords = feature.geometry.coordinates;
+      const geom = feature.geometry;
+      // LineString/MultiLineStringの両方を受け付ける(2026-09-22。優先順位マージの
+      // difference演算や、自治体データの原本が最初からMultiLineStringのことがある)。
+      const lines = geom.type === "MultiLineString" ? geom.coordinates : [geom.coordinates];
       const tier = feature.properties ? feature.properties.tier : undefined;
+      // 2026-09-22: 高速道路風レイヤー(サイクリングロード)の分岐点に路線名を
+      // 表示するために、フィーチャのnameをエッジにも持たせる(以前は名前を
+      // 引き回していなかったため、その機能を使うcycleway-junction-labelが
+      // 実質的に常に空振りしていた)。
+      const name = feature.properties ? feature.properties.name : undefined;
       const multiplier = getWeight(feature);
-      for (let i = 0; i < coords.length - 1; i++) {
-        const [lon1, lat1] = coords[i];
-        const [lon2, lat2] = coords[i + 1];
-        const a = getOrCreateNode(lon1, lat1);
-        const b = getOrCreateNode(lon2, lat2);
-        const dist = haversineMeters(lon1, lat1, lon2, lat2);
-        const weight = dist * multiplier;
-        adjacency[a].push({ to: b, dist, weight, tier });
-        adjacency[b].push({ to: a, dist, weight, tier });
+      for (const coords of lines) {
+        for (let i = 0; i < coords.length - 1; i++) {
+          const [lon1, lat1] = coords[i];
+          const [lon2, lat2] = coords[i + 1];
+          const a = getOrCreateNode(lon1, lat1);
+          const b = getOrCreateNode(lon2, lat2);
+          const dist = haversineMeters(lon1, lat1, lon2, lat2);
+          const weight = dist * multiplier;
+          adjacency[a].push({ to: b, dist, weight, tier, name });
+          adjacency[b].push({ to: a, dist, weight, tier, name });
+        }
       }
     }
     return { nodeCoords, nodeIndex, adjacency };
@@ -204,8 +214,9 @@ const CycleGraph = (() => {
       const last = segments[segments.length - 1];
       if (last && last.tier === edge.tier) {
         last.distanceM += edge.dist;
+        last.toIdx = i + 1; // pathのインデックス。区間の座標範囲を後から取り出せるようにする
       } else {
-        segments.push({ tier: edge.tier, distanceM: edge.dist });
+        segments.push({ tier: edge.tier, distanceM: edge.dist, fromIdx: i, toIdx: i + 1 });
       }
     }
     return { path, distanceM, weightedDistanceM: weightDist[endIdx], tierDistanceM, segments };

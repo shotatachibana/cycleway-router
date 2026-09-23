@@ -5,8 +5,8 @@
       "name": "品川駅 → 高崎駅",
       "from_name": "品川駅",
       "to_name": "高崎駅",
-      "length_km": 158.7,
-      "cycleway_share": 0.747,
+      "length_km": 158.6,
+      "cycleway_share": 0.737,
       "file": "routes/shinagawa-takasaki.geojson",
       "created": "2026-09-20",
       "note": "専用道路優先+一般道を長さペナルティ付きで接続するR5カスタムコストで、開発コンテナ内で事前計算。R5は常時稼働サーバーとしては使っていない(CLAUDE.md参照)"

@@ -1,0 +1,23 @@
+tokyo:
+  license: "CC-BY-4.0"
+  license_url: "https://creativecommons.org/licenses/by/4.0/deed.ja"
+  attribution_text: "東京都建設局「自転車走行空間について」(CC BY 4.0)"
+  resources:
+    recommended_route:
+      url: "https://www.kensetsu.metro.tokyo.lg.jp/documents/d/kensetsu/000035730"
+      zip_path: "data/raw/municipal_tokyo/recommended_route.zip"
+      status_field: "整備状況"
+      status_include: ["整備済"]
+      name_field: "区間番号"
+    priority_section:
+      url: "https://www.kensetsu.metro.tokyo.lg.jp/content/000035729.zip"
+      zip_path: "data/raw/municipal_tokyo/priority_section.zip"
+      status_field: "凡例名称"
+      status_include: ["平成23年度までの整備済み箇所"]
+      name_field: "凡例名称"
+
+output:
+  municipal_geojson: "data/processed/municipal/tokyo_kensetsukyoku.geojson"
+
+coordinate_precision_digits: 6
+default_tier: 5

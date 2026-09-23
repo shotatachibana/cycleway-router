@@ -1,0 +1,20 @@
+# ユーザーが「これはサイクリングロードとして高速道路風に見せたい」と判断した
+# 道路名をここに列挙する。ジオメトリはOSMのname完全一致で自動抽出する。
+# aliasesは表記ゆれ・迂回路等の別名がある場合だけ追加する(無ければ省略可)。
+routes:
+  - name: "多摩川サイクリングロード"
+  - name: "荒川サイクリングロード"
+
+input:
+  cycleway_raw: "data/raw/osm_survey/kanto_independent_cycleway.json"
+  separated_track_raw: "data/raw/osm_survey/kanto_separated_track.json"
+
+output:
+  highway_routes_geojson: "docs/data/highway_routes.geojson"
+
+coordinate_precision_digits: 6
+metric_crs: "EPSG:32654"
+# name完全一致したwayを起点に、座標がこの距離(m)以内で繋がっている他のway
+# (無名・別名の接続区間)も芋づる式に含める。それでも繋がらない箇所は
+# 「本当の空白」として警告に出す(instruction.md参照)。
+connect_tolerance_m: 30
